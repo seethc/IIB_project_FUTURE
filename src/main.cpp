@@ -16,9 +16,10 @@
 // int myFunction(int x, int y) {
 //   return x + y;
 // }
-
+#include <Arduino.h>
 #include <Crypto.h>
 #include <SHA256.h>
+#include <string.h>
 
 const uint8_t secretKey[] = "12345678901234567890";
 
