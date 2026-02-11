@@ -64,10 +64,10 @@ uint32_t generateTOTP(uint32_t time) {
 
   int offset = finalHash[19] & 0x0F;
   uint32_t binary =
-      ((finalHash[offset] & 0x7F) << 24) |
-      ((finalHash[offset + 1] & 0xFF) << 16) |
-      ((finalHash[offset + 2] & 0xFF) << 8) |
-      (finalHash[offset + 3] & 0xFF);
+      ((uint32_t)(finalHash[offset] & 0x7F) << 24) |
+      ((uint32_t)(finalHash[offset + 1] & 0xFF) << 16) |
+      ((uint32_t)(finalHash[offset + 2] & 0xFF) << 8) |
+      ((uint32_t)(finalHash[offset + 3] & 0xFF));
 
   return binary % 1000000; // 6 digits
 }
