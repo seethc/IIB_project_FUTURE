@@ -1,2 +1,2 @@
 # IIB_project_FUTURE
-TOTP implementation for Arduino (and other microcontrollers)
+TOTP implementation for an ATtiny1616 based keyfob device and a Raspberry Pi based clinical-side backend.
