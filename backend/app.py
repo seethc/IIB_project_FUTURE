@@ -4,7 +4,7 @@ import time
 import struct
 
 # --- CONFIG ---
-SECRET_KEY = b"12345678901234567890"  # raw bytes exactly like your Arduino
+SECRET_KEY = b"12345678901234567890"  
 TIMESTEP = 30  # 30-second TOTP window
 
 # --- GLOBAL CLOCK ---
