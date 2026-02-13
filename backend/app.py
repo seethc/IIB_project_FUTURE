@@ -1,23 +1,3 @@
-<<<<<<< HEAD
-import pyotp
-import time
-
-# Demo patient secret (base32, should match the token)
-# For production, generate and store securely per patient
-DEMO_SECRET = "JBSWY3DPEHPK3PXP"
-
-def generate_totp(secret):
-    totp = pyotp.TOTP(secret, interval=30)  # 30 second interval
-    return totp.now()
-
-def main():
-    print("Starting TOTP backend...")
-    try:
-        while True:
-            code = generate_totp(DEMO_SECRET)
-            print(f"Current backend TOTP code: {code}")
-            time.sleep(1)  # update every second
-=======
 import hmac
 import hashlib
 import time
@@ -25,7 +5,7 @@ import struct
 
 # --- CONFIG ---
 SECRET_KEY = b"12345678901234567890"  
-TIMESTEP = 30  # 30-second TOTP window
+TIMESTEP = 1 # 30-second TOTP window
 
 # --- GLOBAL CLOCK ---
 start_time = time.time()  # reset clock for PoC
@@ -70,7 +50,6 @@ def main():
             code = generate_totp(SECRET_KEY, uptime)
             display_code(code)
             time.sleep(1)
->>>>>>> 4241b06ff4c3e38b9a06b555dfb46760263afc80
     except KeyboardInterrupt:
         print("Backend stopped")
 
