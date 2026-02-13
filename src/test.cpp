@@ -26,7 +26,7 @@ void prepareHMACPads() {
 void setup() {
   Serial.begin(9600);
   while (!Serial) {
-    ; // Wait for serial port to connect (for Leonardo/Micro)
+    ; // Wait for serial port to connect
   }
   delay(1000);
   

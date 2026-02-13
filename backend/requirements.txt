@@ -1,9 +1,5 @@
-<<<<<<< HEAD
-pyotp
-=======
 pyotp
 hmac
 hashlib
 time
 struct
->>>>>>> 4241b06ff4c3e38b9a06b555dfb46760263afc80
