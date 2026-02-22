@@ -1,139 +1,141 @@
 #include <Arduino.h>
+#include <U8g2lib.h>
+#include <SPI.h>
+#include <Wire.h>
+#include <RTClib.h>
 #include <Crypto.h>
 #include <SHA1.h>
-#include <string.h>
+
+// --- OLED PINS ---
+#define PIN_CLK  PIN_PA4
+#define PIN_MOSI PIN_PA5
+#define PIN_CS   PIN_PA3
+#define PIN_DC   PIN_PA6
+#define PIN_RST  PIN_PA7
+
+// Note this is for the 128x64 OLED test display, not the 200x200 ST7305 LCD.
+U8G2_SSD1306_128X64_NONAME_F_4W_SW_SPI u8g2(U8G2_R0, PIN_CLK, PIN_MOSI, PIN_CS, PIN_DC, PIN_RST);
+
+// --- RTC ---
+RTC_DS3231 rtc;
+
+uint32_t startUnix = 0;
+uint32_t lastSec   = 0;
 
 // --- TOTP CONFIG ---
 const uint8_t secretKey[] = "12345678901234567890";
-const uint32_t timestep = 30;
+const uint32_t timestep   = 30;
 
-// --- GLOBALS ---
-SHA1 hash;
+// --- HMAC PADS ---
+SHA1 sha1hash;
 uint8_t i_key_pad[64];
 uint8_t o_key_pad[64];
 
 // --- HMAC PREPARATION ---
 void prepareHMACPads() {
-  memset(i_key_pad, 0x36, 64);
-  memset(o_key_pad, 0x5C, 64);
+    memset(i_key_pad, 0x36, 64);
+    memset(o_key_pad, 0x5C, 64);
 
-  for (int i = 0; i < sizeof(secretKey) - 1; i++) {
-    i_key_pad[i] ^= secretKey[i];
-    o_key_pad[i] ^= secretKey[i];
-  }
+    for (size_t i = 0; i < sizeof(secretKey) - 1; i++) {
+        i_key_pad[i] ^= secretKey[i];
+        o_key_pad[i] ^= secretKey[i];
+    }
 }
 
+// --- TOTP GENERATION ---
+uint32_t generateTOTP(uint32_t elapsedTime) {
+    uint64_t counter = elapsedTime / timestep;
+
+    uint8_t counterBytes[8];
+    for (int i = 7; i >= 0; --i) {
+        counterBytes[i] = counter & 0xFF;
+        counter >>= 8;
+    }
+
+    uint8_t tempHash[20];
+    sha1hash.reset();
+    sha1hash.update(i_key_pad, 64);
+    sha1hash.update(counterBytes, 8);
+    sha1hash.finalize(tempHash, sizeof(tempHash));
+
+    uint8_t finalHash[20];
+    sha1hash.reset();
+    sha1hash.update(o_key_pad, 64);
+    sha1hash.update(tempHash, sizeof(tempHash));
+    sha1hash.finalize(finalHash, sizeof(finalHash));
+
+    int offset = finalHash[19] & 0x0F;
+
+    uint32_t binary =
+        ((uint32_t)(finalHash[offset]     & 0x7F) << 24) |
+        ((uint32_t)(finalHash[offset + 1] & 0xFF) << 16) |
+        ((uint32_t)(finalHash[offset + 2] & 0xFF) << 8)  |
+        ((uint32_t)(finalHash[offset + 3] & 0xFF));
+
+    return binary % 1000000;
+}
+
+// --- DRAW CENTERED ROW ---
+void drawCentered(const char* str, int16_t y) {
+    int16_t w = u8g2.getStrWidth(str);
+    u8g2.drawStr((128 - w) / 2, y, str);
+}
+
+// --- DISPLAY ---
+void drawScreen(DateTime now, uint32_t elapsed) {
+    // Row 1: 6-digit TOTP code — uses elapsed seconds, matching Pi implementation
+    char codeStr[7];
+    snprintf(codeStr, sizeof(codeStr), "%06lu", generateTOTP(elapsed));
+
+    // Row 2: HHMMSS (digits only, no colons)
+    char timeStr[7];
+    snprintf(timeStr, sizeof(timeStr), "%02d%02d%02d",
+             now.hour(), now.minute(), now.second());
+
+    // Row 3: elapsed seconds
+    char elapsedStr[11];
+    snprintf(elapsedStr, sizeof(elapsedStr), "%lu", elapsed);
+
+    u8g2.clearBuffer();
+    u8g2.setFont(u8g2_font_lubR08_tn);
+
+    drawCentered(codeStr,    18);
+    drawCentered(timeStr,    39);
+    drawCentered(elapsedStr, 60);
+
+    u8g2.sendBuffer();
+}
+
+// --- SETUP ---
 void setup() {
-  Serial.begin(9600);
-  while (!Serial) {
-    ; // Wait for serial port to connect
-  }
-  delay(1000);
-  
-  Serial.println("=== TOTP Debug Test ===");
-  Serial.println();
-  
-  // Print secret key
-  Serial.print("Secret key (hex): ");
-  for (int i = 0; i < sizeof(secretKey) - 1; i++) {
-    if (secretKey[i] < 16) Serial.print("0");
-    Serial.print(secretKey[i], HEX);
-  }
-  Serial.println();
-  
-  // Test with time = 0
-  uint32_t time = 0;
-  uint64_t counter = time / timestep;
-  
-  Serial.print("Counter: ");
-  Serial.println((uint32_t)counter);
-  
-  // Counter bytes
-  uint8_t counterBytes[8];
-  uint64_t tempCounter = counter;
-  for (int i = 7; i >= 0; --i) {
-    counterBytes[i] = tempCounter & 0xFF;
-    tempCounter >>= 8;
-  }
-  
-  Serial.print("Counter bytes (hex): ");
-  for (int i = 0; i < 8; i++) {
-    if (counterBytes[i] < 16) Serial.print("0");
-    Serial.print(counterBytes[i], HEX);
-  }
-  Serial.println();
-  
-  // Prepare HMAC pads
-  prepareHMACPads();
-  
-  // Print i_key_pad (first 20 bytes for verification)
-  Serial.print("i_key_pad (first 20 bytes): ");
-  for (int i = 0; i < 20; i++) {
-    if (i_key_pad[i] < 16) Serial.print("0");
-    Serial.print(i_key_pad[i], HEX);
-  }
-  Serial.println();
-  
-  // Compute inner hash
-  uint8_t tempHash[20];
-  hash.reset();
-  hash.update(i_key_pad, 64);
-  hash.update(counterBytes, 8);
-  hash.finalize(tempHash, sizeof(tempHash));
-  
-  Serial.print("Inner hash (hex): ");
-  for (int i = 0; i < 20; i++) {
-    if (tempHash[i] < 16) Serial.print("0");
-    Serial.print(tempHash[i], HEX);
-  }
-  Serial.println();
-  
-  // Compute outer hash (final HMAC)
-  uint8_t finalHash[20];
-  hash.reset();
-  hash.update(o_key_pad, 64);
-  hash.update(tempHash, sizeof(tempHash));
-  hash.finalize(finalHash, sizeof(finalHash));
-  
-  Serial.print("HMAC-SHA1 output (hex): ");
-  for (int i = 0; i < 20; i++) {
-    if (finalHash[i] < 16) Serial.print("0");
-    Serial.print(finalHash[i], HEX);
-  }
-  Serial.println();
-  
-  // Dynamic truncation
-  int offset = finalHash[19] & 0x0F;
-  Serial.print("Offset: ");
-  Serial.println(offset);
-  
-  Serial.print("Bytes at offset [");
-  Serial.print(offset);
-  Serial.print("]: ");
-  for (int i = 0; i < 4; i++) {
-    if (finalHash[offset + i] < 16) Serial.print("0");
-    Serial.print(finalHash[offset + i], HEX);
-    Serial.print(" ");
-  }
-  Serial.println();
-  
-  uint32_t binary =
-    ((uint32_t)(finalHash[offset] & 0x7F) << 24) |
-    ((uint32_t)(finalHash[offset + 1] & 0xFF) << 16) |
-    ((uint32_t)(finalHash[offset + 2] & 0xFF) << 8) |
-    ((uint32_t)(finalHash[offset + 3] & 0xFF));
-  
-  Serial.print("Binary (truncated): ");
-  Serial.println(binary);
-  
-  uint32_t code = binary % 1000000;
-  Serial.print("Final TOTP code: ");
-  Serial.println(code);
-  
-  Serial.println();
-  Serial.println("=== Test Complete ===");
+    Wire.swap(1);   // PA1=SDA, PA2=SCL
+    Wire.begin();
+
+    u8g2.begin();
+
+    if (!rtc.begin()) {
+        u8g2.clearBuffer();
+        u8g2.setFont(u8g2_font_lubR08_tn);
+        drawCentered("000000", 39);
+        u8g2.sendBuffer();
+        while (true) {}
+    }
+
+    prepareHMACPads();
+
+    startUnix = rtc.now().unixtime();
+    lastSec   = 0;
 }
 
+// --- LOOP ---
 void loop() {
-  // Nothing to do
+    DateTime now     = rtc.now();
+    uint32_t elapsed = now.unixtime() - startUnix;
+
+    if (elapsed != lastSec) {
+        lastSec = elapsed;
+        drawScreen(now, elapsed);
+    }
+
+    delay(200);
 }
