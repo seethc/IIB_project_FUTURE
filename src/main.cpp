@@ -8,19 +8,25 @@
 #include <avr/interrupt.h>
 
 // --- PINS (ATtiny1616) ---
-#define PIN_CLK  PIN_PA3
-#define PIN_MOSI PIN_PA1
-#define PIN_CS   PIN_PA4
-#define PIN_DC   PIN_PA7
-#define PIN_RST  PIN_PA6
-#define PIN_BUTTON PIN_PA2
+// SPI display - now on port C (alternate SPI pins)
+#define PIN_CLK  PIN_PC0
+#define PIN_MOSI PIN_PC2
+#define PIN_CS   PIN_PC3
+#define PIN_DC   PIN_PA3   
+#define PIN_RST  PIN_PA4   
+
+// UART
+// PA1 = TX (hardware, no define needed)
+// PA2 = RX (hardware, no define needed)
+
+#define PIN_BUTTON PIN_PA6
 
 // --- DISPLAY ---
 U8G2_ST7305_200X200_1_4W_SW_SPI u8g2(U8G2_R0, PIN_CLK, PIN_MOSI, PIN_CS, PIN_DC, PIN_RST);
 
 // --- TOTP CONFIG ---
 const uint8_t secretKey[] = "12345678901234567890";
-const uint32_t timestep = 1;
+const uint32_t timestep = 30;
 
 // --- GLOBALS ---
 SHA1 hash;
@@ -115,7 +121,7 @@ void displayCode(uint32_t code) {
 
   u8g2.firstPage();
   do {
-    u8g2.setFont(u8g2_font_logisoso42_tn);
+    u8g2.setFont(u8g2_font_logisoso24_tn);
     
     int textWidth = u8g2.getStrWidth(text);
     int x = (200 - textWidth) / 2;
@@ -165,9 +171,11 @@ void setup() {
   
   // TOTP setup
   prepareHMACPads();
-  
+
   // Clear display initially
   clearDisplay();
+
+
 }
 
 // --- MAIN LOOP ---
