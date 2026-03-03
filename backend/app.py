@@ -2,9 +2,15 @@ import hmac
 import hashlib
 import time
 import struct
-import smbus
 import csv  
 from datetime import datetime, timezone
+
+try:
+    import smbus
+    HAS_SMBUS = True
+except ImportError:
+    print("WARNING: smbus not found (likely not on Raspberry Pi). I2C will be mocked.")
+    HAS_SMBUS = False
 
 # --- CONFIG ---
 SECRET_KEY = b"12345678901234567890"  
@@ -14,7 +20,14 @@ BUS_NUMBER = 1  # Raspberry Pi 4 uses I2C bus 1
 CSV_FILENAME = "totp_log.csv" 
 
 # Initialize I2C Bus
-bus = smbus.SMBus(BUS_NUMBER)
+if HAS_SMBUS:
+    try:
+        bus = smbus.SMBus(BUS_NUMBER)
+    except Exception as e:
+        print(f"I2C Bus failed: {e}")
+        bus = None
+else:
+    bus = None
 
 # --- HELPER FUNCTIONS ---
 def bcd_to_int(bcd):
@@ -24,7 +37,11 @@ def bcd_to_int(bcd):
 def get_rtc_timestamp():
     """
     Reads the DS3231 registers and converts to a linear Unix timestamp.
+    If hardware is missing, uses system time as a mock.
     """
+    if bus is None:
+        return int(time.time())
+
     try:
         regs = bus.read_i2c_block_data(DS3231_ADDR, 0x00, 7)
         
@@ -40,7 +57,7 @@ def get_rtc_timestamp():
         
     except Exception as e:
         print(f"Error reading RTC: {e}")
-        return 0
+        return int(time.time())
 
 # --- TOTP GENERATION ---
 def generate_totp(secret, elapsed_time):

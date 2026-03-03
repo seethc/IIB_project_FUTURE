@@ -3,3 +3,5 @@ hmac
 hashlib
 time
 struct
+Flask
+pyserial

@@ -5,7 +5,7 @@ import datetime
 # --- CONFIGURATION ---
 COM_PORT = 'COM3'
 BAUD_RATE = 9600
-CSV_FILENAME = 'attiny_log.csv'
+CSV_FILENAME = 'attiny_log_nortc.csv'
 
 try:
     ser = serial.Serial(COM_PORT, BAUD_RATE, timeout=1)
