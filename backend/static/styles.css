@@ -64,9 +64,19 @@ body {
 }
 
 @keyframes float {
-    0%, 100% { transform: translate(0, 0) scale(1); }
-    33% { transform: translate(30px, -50px) scale(1.1); }
-    66% { transform: translate(-20px, 20px) scale(0.9); }
+
+    0%,
+    100% {
+        transform: translate(0, 0) scale(1);
+    }
+
+    33% {
+        transform: translate(30px, -50px) scale(1.1);
+    }
+
+    66% {
+        transform: translate(-20px, 20px) scale(0.9);
+    }
 }
 
 /* Glassmorphism Panel */
@@ -119,9 +129,11 @@ body {
     flex-direction: column;
     gap: 8px;
 }
+
 .device-list::-webkit-scrollbar {
     width: 4px;
 }
+
 .device-list::-webkit-scrollbar-thumb {
     background: var(--glass-border);
     border-radius: 4px;
@@ -239,7 +251,7 @@ body {
     font-weight: 700;
     letter-spacing: 4px;
     z-index: 2;
-    text-shadow: 0 4px 12px rgba(0,0,0,0.5);
+    text-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
 }
 
 .sync-info {
@@ -374,6 +386,99 @@ body {
 
 .primary-btn:active {
     transform: translateY(0);
+}
+
+/* Admin Panel */
+.admin-panel {
+    margin-top: 24px;
+    padding: 20px;
+    background: rgba(0, 0, 0, 0.15);
+    border-radius: 12px;
+    border: 1px solid var(--glass-border);
+}
+
+.admin-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+    border-bottom: 1px solid var(--glass-border);
+    padding-bottom: 8px;
+}
+
+.admin-header h4 {
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.admin-details p {
+    font-size: 0.9rem;
+    margin-bottom: 8px;
+    color: var(--text-secondary);
+}
+
+.admin-details strong {
+    color: var(--text-primary);
+    margin-right: 8px;
+}
+
+.revealable-text {
+    filter: blur(5px);
+    cursor: pointer;
+    transition: filter 0.3s;
+}
+
+.revealable-text:hover,
+.revealable-text.revealed {
+    filter: blur(0);
+}
+
+.admin-actions {
+    display: flex;
+    gap: 12px;
+    margin-top: 20px;
+}
+
+.secondary-btn {
+    background: transparent;
+    border: 1px solid var(--glass-border);
+    color: var(--text-secondary);
+    padding: 8px 16px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-family: inherit;
+    font-size: 0.85rem;
+}
+
+.secondary-btn:hover {
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--text-primary);
+}
+
+.danger-border {
+    border-color: rgba(239, 68, 68, 0.4);
+    color: #ef4444;
+}
+
+.danger-border:hover {
+    background: rgba(239, 68, 68, 0.1);
+    color: #ef4444;
+}
+
+.small-btn {
+    padding: 4px 8px;
+    font-size: 0.75rem;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.small-btn i {
+    width: 14px;
+    height: 14px;
 }
 
 .hidden {

@@ -6,13 +6,21 @@ document.addEventListener('DOMContentLoaded', () => {
     const activeDeviceName = document.getElementById('active-device-name');
     const totpCode = document.getElementById('totp-code');
     const progressCircle = document.getElementById('progress-circle');
-    
+
     const addDeviceBtn = document.getElementById('add-device-btn');
     const deleteDeviceBtn = document.getElementById('delete-device-btn');
     const registerModal = document.getElementById('register-modal');
     const closeModalBtn = document.querySelector('.close-modal');
     const registerForm = document.getElementById('register-form');
     const deviceNameInput = document.getElementById('device-name');
+
+    const toggleAdminBtn = document.getElementById('toggle-admin-btn');
+    const adminPanel = document.getElementById('admin-panel');
+    const verifyBtn = document.getElementById('verify-btn');
+    const adminSecret = document.getElementById('admin-secret');
+    const adminElapsed = document.getElementById('admin-elapsed');
+    const resyncTimerBtn = document.getElementById('resync-timer-btn');
+    const resetKeyBtn = document.getElementById('reset-key-btn');
 
     // --- State ---
     let devices = [];
@@ -48,7 +56,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 body: JSON.stringify({ name })
             });
             const data = await response.json();
-            
+
             if (data.success) {
                 if (!data.device.uart_success) {
                     // Just log it or show a subtle notification. It will likely fail locally 
@@ -72,7 +80,12 @@ document.addEventListener('DOMContentLoaded', () => {
     async function deleteDevice(id) {
         if (!confirm('Are you sure you want to delete this token?')) return;
         try {
-            await fetch(`/api/devices/${id}`, { method: 'DELETE' });
+            const response = await fetch(`/api/devices/${id}`, { method: 'DELETE' });
+            if (response.status === 403) {
+                const data = await response.json();
+                alert(data.error);
+                return;
+            }
             if (activeDeviceId === id) {
                 activeDeviceId = null;
                 showEmptyState();
@@ -80,6 +93,26 @@ document.addEventListener('DOMContentLoaded', () => {
             fetchDevices();
         } catch (error) {
             console.error('Failed to delete:', error);
+        }
+    }
+
+    async function resetDevice(newKey) {
+        if (!activeDeviceId) return;
+        try {
+            const res = await fetch(`/api/devices/${activeDeviceId}/reset`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ new_key: newKey })
+            });
+            const data = await res.json();
+            if (data.success) {
+                alert(`Device reset successfully.\nNew Key: ${data.secret_key}\nNew Sync Time: ${data.sync_time}`);
+                await fetchDevices();
+                selectDevice(activeDeviceId);
+            }
+        } catch (e) {
+            console.error(e);
+            alert("Failed to reset device.");
         }
     }
 
@@ -93,11 +126,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
             const data = await response.json();
-            
+
             // Format code: add space in middle (e.g. 123 456)
             const codeStr = data.totp;
             totpCode.textContent = `${codeStr.slice(0, 3)} ${codeStr.slice(3)}`;
-            
+
             // Update progress circle
             const percentage = data.remaining / TIMESTEP;
             const offset = CIRCUMFERENCE - (percentage * CIRCUMFERENCE);
@@ -109,6 +142,8 @@ document.addEventListener('DOMContentLoaded', () => {
             } else {
                 progressCircle.classList.remove('warning');
             }
+
+            adminElapsed.textContent = data.elapsed;
 
         } catch (error) {
             console.error('Failed to update TOTP:', error);
@@ -134,13 +169,16 @@ document.addEventListener('DOMContentLoaded', () => {
     function selectDevice(id) {
         activeDeviceId = id;
         renderDeviceList();
-        
+
         const device = devices.find(d => d.id === id);
         if (device) {
             activeDeviceName.textContent = device.name;
+            adminSecret.textContent = device.secret_key;
+            adminSecret.classList.remove('revealed');
+
             showTOTPView();
             updateTOTP(); // fetch immediately
-            
+
             if (totpInterval) clearInterval(totpInterval);
             totpInterval = setInterval(updateTOTP, 1000); // refresh every second
         }
@@ -171,7 +209,45 @@ document.addEventListener('DOMContentLoaded', () => {
     addDeviceBtn.addEventListener('click', openModal);
     closeModalBtn.addEventListener('click', closeModal);
     deleteDeviceBtn.addEventListener('click', () => deleteDevice(activeDeviceId));
-    
+
+    toggleAdminBtn.addEventListener('click', () => {
+        adminPanel.classList.toggle('hidden');
+    });
+
+    adminSecret.addEventListener('click', () => {
+        adminSecret.classList.toggle('revealed');
+    });
+
+    verifyBtn.addEventListener('click', async () => {
+        if (!activeDeviceId) return;
+        verifyBtn.disabled = true;
+        const originalText = verifyBtn.innerHTML;
+        verifyBtn.innerHTML = 'Verifying...';
+
+        try {
+            const res = await fetch(`/api/devices/${activeDeviceId}/verify`, { method: 'POST' });
+            const data = await res.json();
+            if (data.verified) {
+                alert("Hardware Verified! The connected token matches this device profile.");
+            } else {
+                alert("Hardware Verification Failed. The connected token does not match.");
+            }
+        } catch (e) {
+            console.error(e);
+            alert("Error verifying hardware.");
+        } finally {
+            verifyBtn.innerHTML = originalText;
+            verifyBtn.disabled = false;
+        }
+    });
+
+    resyncTimerBtn.addEventListener('click', () => resetDevice(false));
+    resetKeyBtn.addEventListener('click', () => {
+        if (confirm("Are you sure you want to generate a new secret key for this token?")) {
+            resetDevice(true);
+        }
+    });
+
     registerModal.addEventListener('click', (e) => {
         if (e.target === registerModal) closeModal();
     });

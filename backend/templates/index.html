@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -8,6 +9,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
     <script src="https://unpkg.com/feather-icons"></script>
 </head>
+
 <body>
     <div class="background-blobs">
         <div class="blob blob-1"></div>
@@ -39,22 +41,46 @@
             <div class="totp-view hidden" id="totp-view">
                 <div class="totp-header">
                     <h2 id="active-device-name">Device Name</h2>
-                    <button id="delete-device-btn" class="icon-btn danger" title="Delete Device">
-                        <i data-feather="trash-2"></i>
-                    </button>
+                    <div class="header-actions" style="display: flex; gap: 8px;">
+                        <button id="toggle-admin-btn" class="icon-btn" title="Admin View">
+                            <i data-feather="terminal"></i>
+                        </button>
+                        <button id="delete-device-btn" class="icon-btn danger" title="Delete Device">
+                            <i data-feather="trash-2"></i>
+                        </button>
+                    </div>
                 </div>
-                
+
                 <div class="totp-display-container">
                     <div class="circular-progress-wrapper">
                         <svg class="circular-progress" viewBox="0 0 100 100">
                             <circle class="circular-progress-bg" cx="50" cy="50" r="45"></circle>
-                            <circle class="circular-progress-value" id="progress-circle" cx="50" cy="50" r="45"></circle>
+                            <circle class="circular-progress-value" id="progress-circle" cx="50" cy="50" r="45">
+                            </circle>
                         </svg>
                         <div class="totp-code" id="totp-code">------</div>
                     </div>
                 </div>
-                
+
                 <p class="sync-info">Powered by shared RTC clock synchronization.</p>
+
+                <div class="admin-panel hidden" id="admin-panel">
+                    <div class="admin-header">
+                        <h4>Admin Controls</h4>
+                        <button id="verify-btn" class="secondary-btn small-btn" title="Verify Hardware Match">
+                            <i data-feather="cpu"></i> Verify Hardware
+                        </button>
+                    </div>
+                    <div class="admin-details">
+                        <p><strong>Key:</strong> <span id="admin-secret" class="revealable-text"
+                                title="Click to reveal">********************</span></p>
+                        <p><strong>Elapsed:</strong> <span id="admin-elapsed">0</span>s</p>
+                    </div>
+                    <div class="admin-actions">
+                        <button id="resync-timer-btn" class="secondary-btn">Resync Timer</button>
+                        <button id="reset-key-btn" class="secondary-btn danger-border">Reset Key & Time</button>
+                    </div>
+                </div>
             </div>
         </main>
     </div>
@@ -71,7 +97,8 @@
                 <form id="register-form">
                     <div class="input-group">
                         <label for="device-name">Device Name</label>
-                        <input type="text" id="device-name" placeholder="e.g. Work Email, Personal Key" required autocomplete="off">
+                        <input type="text" id="device-name" placeholder="e.g. Work Email, Personal Key" required
+                            autocomplete="off">
                     </div>
                     <button type="submit" class="primary-btn" id="register-submit-btn">
                         <span class="btn-text">Provision Device</span>
@@ -86,4 +113,5 @@
         feather.replace();
     </script>
 </body>
+
 </html>

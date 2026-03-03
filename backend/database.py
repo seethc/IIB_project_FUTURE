@@ -43,6 +43,13 @@ def add_device(name, secret_key, sync_time):
     conn.close()
     return device_id
 
+def update_device(device_id, secret_key, sync_time):
+    conn = get_db_connection()
+    conn.execute('UPDATE devices SET secret_key = ?, sync_time = ? WHERE id = ?',
+                 (secret_key, sync_time, device_id))
+    conn.commit()
+    conn.close()
+
 def delete_device(device_id):
     conn = get_db_connection()
     conn.execute('DELETE FROM devices WHERE id = ?', (device_id,))
