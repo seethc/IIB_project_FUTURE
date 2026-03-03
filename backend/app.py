@@ -3,6 +3,7 @@ import hashlib
 import time
 import struct
 import smbus
+import csv  
 from datetime import datetime, timezone
 
 # --- CONFIG ---
@@ -10,6 +11,7 @@ SECRET_KEY = b"12345678901234567890"
 TIMESTEP = 30 
 DS3231_ADDR = 0x68
 BUS_NUMBER = 1  # Raspberry Pi 4 uses I2C bus 1
+CSV_FILENAME = "totp_log.csv" 
 
 # Initialize I2C Bus
 bus = smbus.SMBus(BUS_NUMBER)
@@ -24,8 +26,6 @@ def get_rtc_timestamp():
     Reads the DS3231 registers and converts to a linear Unix timestamp.
     """
     try:
-        # Read 7 bytes starting from register 0x00 (Seconds)
-        # 00:Sec, 01:Min, 02:Hour, 03:Day, 04:Date, 05:Month, 06:Year
         regs = bus.read_i2c_block_data(DS3231_ADDR, 0x00, 7)
         
         sec = bcd_to_int(regs[0])
@@ -35,7 +35,6 @@ def get_rtc_timestamp():
         month = bcd_to_int(regs[5] & 0x1F)
         year = bcd_to_int(regs[6]) + 2000
         
-        # Convert to linear timestamp
         dt = datetime(year, month, day, hour, min, sec, tzinfo=timezone.utc)
         return int(dt.timestamp())
         
@@ -63,48 +62,54 @@ def generate_totp(secret, elapsed_time):
 def main():
     print("Initializing...")
     
-    # 1. Capture the "Zero Point" from the RTC
-    # This ignores system time and locks "T=0" to the current RTC reading
     start_timestamp = get_rtc_timestamp()
     
     if start_timestamp == 0:
         print("Failed to read RTC. Check wiring.")
         return
 
-    # Header
-    print("-" * 55)
-    print(f"{'RTC TIME':<15} | {'TOTP CODE':<10} | {'ELAPSED TIME (s)':<15}")
-    print("-" * 55)
+    # Open the CSV file in append mode ('a')
+    with open(CSV_FILENAME, mode='a', newline='', encoding='utf-8') as file:
+        writer = csv.writer(file)
+        
+        # Write the header row to the CSV
+        writer.writerow(["SYS UTC (INTERNET)", "RTC TIME", "TOTP CODE", "ELAPSED (s)"])
+        
+        # Console Header
+        print("-" * 75)
+        print(f"{'SYS UTC (INTERNET)':<20} | {'RTC TIME':<10} | {'TOTP CODE':<10} | {'ELAPSED (s)':<15}")
+        print("-" * 75)
+        print(f"Logging data to {CSV_FILENAME}... Press Ctrl+C to stop.")
 
-    last_processed_time = -1
+        last_processed_time = -1
 
-    try:
-        while True:
-            # 2. Get current Raw RTC time
-            current_timestamp = get_rtc_timestamp()
-            
-            # Only update display if the second has changed
-            if current_timestamp != last_processed_time:
+        try:
+            while True:
+                current_timestamp = get_rtc_timestamp()
                 
-                # 3. Calculate Total Elapsed (Linear, non-resetting)
-                elapsed_seconds = current_timestamp - start_timestamp
+                if current_timestamp != last_processed_time:
+                    
+                    elapsed_seconds = current_timestamp - start_timestamp
+                    totp_code = generate_totp(SECRET_KEY, elapsed_seconds)
+                    
+                    rtc_str = datetime.fromtimestamp(current_timestamp, timezone.utc).strftime('%H:%M:%S')
+                    system_utc_now = datetime.now(timezone.utc).strftime('%H:%M:%S.%f')[:-3]
+                    
+                    # 1. Print to the console
+                    print(f"{system_utc_now:<20} | {rtc_str:<10} | {totp_code:06d}    | {elapsed_seconds:<15}")
+                    
+                    # 2. Write to the CSV file
+                    writer.writerow([system_utc_now, rtc_str, f"{totp_code:06d}", elapsed_seconds])
+                    
+                    # 3. Flush the file buffer so data is saved immediately
+                    file.flush()
+                    
+                    last_processed_time = current_timestamp
                 
-                # 4. Generate TOTP using the ELAPSED time
-                totp_code = generate_totp(SECRET_KEY, elapsed_seconds)
-                
-                # 5. Display Formatting
-                rtc_str = datetime.fromtimestamp(current_timestamp, timezone.utc).strftime('%H:%M:%S')
-                
-                # Print the row
-                print(f"{rtc_str:<15} | {totp_code:06d}     | {elapsed_seconds:<15}")
-                
-                last_processed_time = current_timestamp
-            
-            # Poll fast enough to catch the second change instantly
-            time.sleep(0.1)
+                time.sleep(0.05)
 
-    except KeyboardInterrupt:
-        print("\nStopped.")
+        except KeyboardInterrupt:
+            print("\nStopped logging. File saved.")
 
 if __name__ == "__main__":
     main()
