@@ -1,0 +1,21 @@
+#include <SoftwareSerial.h>
+
+SoftwareSerial attinySerial(10, 11); // RX=10, TX=11
+
+void setup() {
+  Serial.begin(9600);
+  attinySerial.begin(9600);
+  Serial.println("--- Bridge Ready (Pass-through mode) ---");
+}
+
+void loop() {
+  // 1. Listen to the ATtiny and print to the PC's Serial Monitor
+  if (attinySerial.available()) {
+    Serial.write(attinySerial.read());
+  }
+  
+  // 2. Listen to the PC's Serial Monitor and send to the ATtiny
+  if (Serial.available()) {
+    attinySerial.write(Serial.read());
+  }
+}

@@ -1,0 +1,118 @@
+#include <Arduino.h>
+#include <Wire.h>
+#include <RTClib.h>
+#include <Crypto.h>
+#include <SHA1.h>
+
+// --- RTC ---
+RTC_DS3231 rtc;
+uint32_t startUnix = 0;
+uint32_t lastSec   = 0;
+
+// --- TOTP CONFIG ---
+const uint8_t secretKey[] = "12345678901234567890";
+const uint32_t timestep   = 30;
+
+// --- HMAC PADS ---
+SHA1 sha1hash;
+uint8_t i_key_pad[64];
+uint8_t o_key_pad[64];
+
+// --- MANUAL DIGIT FORMATTER ---
+void formatDecimal(char* buf, uint32_t val, uint8_t digits) {
+    for (int8_t i = digits - 1; i >= 0; i--) {
+        buf[i] = '0' + (val % 10);
+        val /= 10;
+    }
+    buf[digits] = '\0';
+}
+
+void prepareHMACPads() {
+    memset(i_key_pad, 0x36, 64);
+    memset(o_key_pad, 0x5C, 64);
+    for (size_t i = 0; i < sizeof(secretKey) - 1; i++) {
+        i_key_pad[i] ^= secretKey[i];
+        o_key_pad[i] ^= secretKey[i];
+    }
+}
+
+uint32_t generateTOTP(uint32_t elapsedTime) {
+    uint64_t counter = elapsedTime / timestep;
+
+    uint8_t counterBytes[8];
+    for (int i = 7; i >= 0; --i) {
+        counterBytes[i] = counter & 0xFF;
+        counter >>= 8;
+    }
+
+    uint8_t tempHash[20];
+    sha1hash.reset();
+    sha1hash.update(i_key_pad, 64);
+    sha1hash.update(counterBytes, 8);
+    sha1hash.finalize(tempHash, sizeof(tempHash));
+
+    uint8_t finalHash[20];
+    sha1hash.reset();
+    sha1hash.update(o_key_pad, 64);
+    sha1hash.update(tempHash, sizeof(tempHash));
+    sha1hash.finalize(finalHash, sizeof(finalHash));
+
+    int offset = finalHash[19] & 0x0F;
+    uint32_t binary =
+        ((uint32_t)(finalHash[offset]     & 0x7F) << 24) |
+        ((uint32_t)(finalHash[offset + 1] & 0xFF) << 16) |
+        ((uint32_t)(finalHash[offset + 2] & 0xFF) << 8)  |
+        ((uint32_t)(finalHash[offset + 3] & 0xFF));
+
+    return binary % 1000000;
+}
+
+void serialPrintAll(uint32_t code, DateTime now, uint32_t elapsed) {
+    char buf[7];
+
+    formatDecimal(buf, code, 6);
+    Serial.print(buf);
+    Serial.print(" | ");
+
+    formatDecimal(buf, now.hour(),   2); Serial.print(buf);
+    formatDecimal(buf, now.minute(), 2); Serial.print(buf);
+    formatDecimal(buf, now.second(), 2); Serial.print(buf);
+    Serial.print(" | ");
+
+    bool started = false;
+    for (uint32_t div = 1000000000UL; div > 0; div /= 10) {
+        uint8_t d = (elapsed / div) % 10;
+        if (d || started || div == 1) { Serial.write('0' + d); started = true; }
+    }
+    Serial.print("\r\n");
+}
+
+void setup() {
+    Wire.swap(1);   // PA1=SDA, PA2=SCL for DS3231
+    Wire.begin();
+
+    Serial.begin(9600, SERIAL_HALF_DUPLEX);  // PB2=TXD
+
+    if (!rtc.begin()) {
+        Serial.print("RTC ERR\r\n");
+        while (true) {}
+    }
+
+    prepareHMACPads();
+    startUnix = rtc.now().unixtime();
+    lastSec   = 0;
+    Serial.print("Ready\r\n");
+}
+
+void loop() {
+    DateTime now     = rtc.now();
+    uint32_t elapsed = now.unixtime() - startUnix;
+
+    if (elapsed != lastSec) {
+        lastSec = elapsed;
+        uint32_t code = generateTOTP(elapsed);
+        serialPrintAll(code, now, elapsed);
+    }
+
+    delay(200);
+}
