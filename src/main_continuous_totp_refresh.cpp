@@ -16,6 +16,7 @@
 #define PIN_CS PIN_PC3
 #define PIN_DC PIN_PA3
 #define PIN_RST PIN_PA4
+
 #define PIN_BUTTON PIN_PA6
 
 // DISPLAY
@@ -27,8 +28,6 @@ constexpr uint8_t KEY_LENGTH = 20;
 constexpr uint8_t KEY_EEPROM_ADDR = 0;
 constexpr uint8_t PROVISIONING_MARKER = 0xAA;
 constexpr uint32_t timestep = 5;
-constexpr uint16_t DISPLAY_WINDOW_SECONDS = 30;
-constexpr uint32_t RTC_OVERFLOW_SECONDS = 65536UL;
 const uint8_t defaultSecretKey[KEY_LENGTH] = {
     '1', '2', '3', '4', '5', '6', '7', '8', '9', '0',
     '1', '2', '3', '4', '5', '6', '7', '8', '9', '0'};
@@ -38,51 +37,32 @@ uint8_t activeSecretKey[KEY_LENGTH];
 uint8_t i_key_pad[64];
 uint8_t o_key_pad[64];
 volatile bool buttonPressed = false;
+
+// TIME TRACKING
+constexpr uint32_t RTC_OVERFLOW_SECONDS = 65536UL;
 volatile uint32_t totalSeconds = 0;
-volatile bool rtcCompareMatched = false;
 bool rtcUsingExternalCrystal = false;
 volatile uint16_t rtcCountSnapshot = 0;
 volatile uint8_t rtcStatusSnapshot = 0;
 volatile uint8_t rtcIntFlagsSnapshot = 0;
 
-void buttonISR();
-
-#define DISABLE_PORT_INPUTS(port)                                               \
-  do {                                                                          \
-    port.PIN0CTRL = PORT_ISC_INPUT_DISABLE_gc;                                  \
-    port.PIN1CTRL = PORT_ISC_INPUT_DISABLE_gc;                                  \
-    port.PIN2CTRL = PORT_ISC_INPUT_DISABLE_gc;                                  \
-    port.PIN3CTRL = PORT_ISC_INPUT_DISABLE_gc;                                  \
-    port.PIN4CTRL = PORT_ISC_INPUT_DISABLE_gc;                                  \
-    port.PIN5CTRL = PORT_ISC_INPUT_DISABLE_gc;                                  \
-    port.PIN6CTRL = PORT_ISC_INPUT_DISABLE_gc;                                  \
-    port.PIN7CTRL = PORT_ISC_INPUT_DISABLE_gc;                                  \
-  } while (0)
-
+// RTC OVERFLOW INTERRUPT
 ISR(RTC_CNT_vect) {
-  const uint8_t flags = RTC.INTFLAGS;
-
-  if ((flags & RTC_OVF_bm) != 0) {
-    totalSeconds += RTC_OVERFLOW_SECONDS;
-  }
-
-  if ((flags & RTC_CMP_bm) != 0) {
-    rtcCompareMatched = true;
-  }
-
-  RTC.INTFLAGS = flags & (RTC_OVF_bm | RTC_CMP_bm);
+  totalSeconds += RTC_OVERFLOW_SECONDS;
+  RTC.INTFLAGS = RTC_OVF_bm;
 }
 
+// DISPLAY STATUS MESSAGE
 void displayMessage(const char *line1, const char *line2 = nullptr) {
   u8g2.firstPage();
   do {
     u8g2.setFont(u8g2_font_6x12_tf);
     if (line1) {
-      const int width1 = u8g2.getStrWidth(line1);
+      int width1 = u8g2.getStrWidth(line1);
       u8g2.drawStr((200 - width1) / 2, 92, line1);
     }
     if (line2) {
-      const int width2 = u8g2.getStrWidth(line2);
+      int width2 = u8g2.getStrWidth(line2);
       u8g2.drawStr((200 - width2) / 2, 112, line2);
     }
   } while (u8g2.nextPage());
@@ -94,165 +74,33 @@ void pollRTCState() {
   rtcIntFlagsSnapshot = RTC.INTFLAGS;
 }
 
-void setupDisplayPins() {
-  pinMode(PIN_CLK, OUTPUT);
-  digitalWrite(PIN_CLK, LOW);
-  pinMode(PIN_MOSI, OUTPUT);
-  digitalWrite(PIN_MOSI, LOW);
-  pinMode(PIN_DC, OUTPUT);
-  digitalWrite(PIN_DC, LOW);
-  pinMode(PIN_CS, OUTPUT);
-  digitalWrite(PIN_CS, HIGH);
-  pinMode(PIN_RST, OUTPUT);
-  digitalWrite(PIN_RST, HIGH);
-}
-
-void writeDisplayByte(uint8_t value) {
-  for (uint8_t mask = 0x80; mask != 0; mask >>= 1) {
-    digitalWrite(PIN_MOSI, (value & mask) != 0 ? HIGH : LOW);
-    digitalWrite(PIN_CLK, HIGH);
-    digitalWrite(PIN_CLK, LOW);
-  }
-}
-
-void sendDisplayCommand(uint8_t command) {
-  digitalWrite(PIN_CS, LOW);
-  digitalWrite(PIN_DC, LOW);
-  writeDisplayByte(command);
-  digitalWrite(PIN_CS, HIGH);
-}
-
-void shutdownDisplay() {
-  setupDisplayPins();
-
-  digitalWrite(PIN_RST, LOW);
-  delay(20);
-  digitalWrite(PIN_RST, HIGH);
-  delay(10);
-
-  sendDisplayCommand(0x28);
-  sendDisplayCommand(0x10);
-  delay(5);
-
-  digitalWrite(PIN_CLK, LOW);
-  digitalWrite(PIN_MOSI, LOW);
-  digitalWrite(PIN_DC, LOW);
-  digitalWrite(PIN_CS, HIGH);
-  digitalWrite(PIN_RST, HIGH);
-}
-
-void beginDisplay() {
-  u8g2.begin();
-  u8g2.setContrast(0x90);
-}
-
-void disableUnusedPeripherals() {
-  ADC0.CTRLA = 0;
-
-#ifdef AC0_CTRLA
-  AC0.CTRLA = 0;
-#endif
-#ifdef DAC0_CTRLA
-  DAC0.CTRLA = 0;
-#endif
-#ifdef VREF_CTRLA
-  VREF.CTRLA = 0;
-#endif
-#ifdef CCL_CTRLA
-  CCL.CTRLA = 0;
-#endif
-#ifdef USART0_CTRLA
-  USART0.CTRLA = 0;
-  USART0.CTRLB = 0;
-#endif
-#ifdef SPI0_CTRLA
-  SPI0.CTRLA = 0;
-  SPI0.INTCTRL = 0;
-#endif
-#ifdef TWI0_MCTRLA
-  TWI0.MCTRLA = 0;
-  TWI0.SCTRLA = 0;
-#endif
-#ifdef TCA0_SINGLE_CTRLA
-  TCA0.SINGLE.CTRLA = 0;
-  TCA0.SINGLE.INTCTRL = 0;
-#endif
-#ifdef TCB0_CTRLA
-  TCB0.CTRLA = 0;
-  TCB0.INTCTRL = 0;
-#endif
-#ifdef TCB1_CTRLA
-  TCB1.CTRLA = 0;
-  TCB1.INTCTRL = 0;
-#endif
-
-#ifdef BOD_SLEEP_DIS_gc
-  BOD.CTRLA = (BOD.CTRLA & ~BOD_SLEEP_gm) | BOD_SLEEP_DIS_gc;
-#endif
-}
-
-void disableDigitalInputBuffersForSleep() {
-#ifdef PORTA
-  PORTA.PIN1CTRL = PORT_ISC_INPUT_DISABLE_gc;
-  PORTA.PIN2CTRL = PORT_ISC_INPUT_DISABLE_gc;
-  PORTA.PIN3CTRL = PORT_ISC_INPUT_DISABLE_gc;
-  PORTA.PIN4CTRL = PORT_ISC_INPUT_DISABLE_gc;
-  PORTA.PIN5CTRL = PORT_ISC_INPUT_DISABLE_gc;
-  PORTA.PIN7CTRL = PORT_ISC_INPUT_DISABLE_gc;
-#endif
-#ifdef PORTB
-  DISABLE_PORT_INPUTS(PORTB);
-#endif
-#ifdef PORTC
-  DISABLE_PORT_INPUTS(PORTC);
-#endif
-}
-
-void configureWakeButton() {
-  pinMode(PIN_BUTTON, INPUT_PULLUP);
-  attachInterrupt(digitalPinToInterrupt(PIN_BUTTON), buttonISR, FALLING);
-}
-
-void beginSerial() {
-  Serial.swap(1);
-  Serial.begin(9600, SERIAL_HALF_DUPLEX);
-  PORTA.PIN1CTRL |= PORT_PULLUPEN_bm;
-}
-
-void prepareLowPowerSleep() {
-  shutdownDisplay();
-  disableUnusedPeripherals();
-  disableDigitalInputBuffersForSleep();
-  configureWakeButton();
-}
-
+// RTC SETUP
 void setupRTC() {
   while (RTC.STATUS > 0 || RTC.PITSTATUS > 0) {
   }
 
   RTC.CTRLA = 0;
   RTC.INTCTRL = 0;
-  RTC.INTFLAGS = RTC_OVF_bm | RTC_CMP_bm;
+  RTC.INTFLAGS = RTC_OVF_bm;
   RTC.PITINTCTRL = 0;
   RTC.PITCTRLA = 0;
   RTC.PITINTFLAGS = RTC_PI_bm;
 
+  // External 32.768 kHz watch crystal on PB3/PB2 (TOSC1/TOSC2).
   _PROTECTED_WRITE(CLKCTRL.XOSC32KCTRLA,
                    CLKCTRL_RUNSTDBY_bm | CLKCTRL_CSUT_64K_gc);
   _PROTECTED_WRITE(CLKCTRL.XOSC32KCTRLA,
                    CLKCTRL_ENABLE_bm | CLKCTRL_RUNSTDBY_bm |
                        CLKCTRL_CSUT_64K_gc);
 
+  // Request the RTC clock domain from the external crystal.
   RTC.CLKSEL = RTC_CLKSEL_TOSC32K_gc;
   RTC.PER = 0xFFFF;
-  RTC.CNT = 0;
-
   while (RTC.STATUS > 0) {
   }
 
   RTC.INTCTRL = RTC_OVF_bm;
   RTC.CTRLA = RTC_PRESCALER_DIV32768_gc | RTC_RTCEN_bm | RTC_RUNSTDBY_bm;
-
   while (RTC.STATUS & RTC_CTRLABUSY_bm) {
   }
   while ((CLKCTRL.MCLKSTATUS & CLKCTRL_XOSC32KS_bm) == 0) {
@@ -262,6 +110,7 @@ void setupRTC() {
   pollRTCState();
 }
 
+// GET TIME FROM RTC
 uint32_t getRTCSeconds() {
   uint32_t overflowSecondsSnapshot;
   uint16_t currentCountSnapshot;
@@ -280,26 +129,11 @@ uint32_t getRTCSeconds() {
   return overflowSecondsSnapshot + currentCountSnapshot;
 }
 
-void sleepForRtcSeconds(uint16_t seconds) {
-  rtcCompareMatched = false;
-  RTC.INTFLAGS = RTC_CMP_bm;
-
-  while (RTC.STATUS & RTC_CMPBUSY_bm) {
+void waitForRTCSeconds(uint32_t seconds) {
+  uint32_t startSeconds = getRTCSeconds();
+  while ((getRTCSeconds() - startSeconds) < seconds) {
+    pollRTCState();
   }
-  RTC.CMP = static_cast<uint16_t>(RTC.CNT + seconds);
-  while (RTC.STATUS & RTC_CMPBUSY_bm) {
-  }
-
-  RTC.INTCTRL |= RTC_CMP_bm;
-
-  while (!rtcCompareMatched) {
-    set_sleep_mode(SLEEP_MODE_STANDBY);
-    sleep_enable();
-    sleep_cpu();
-    sleep_disable();
-  }
-
-  RTC.INTCTRL &= static_cast<uint8_t>(~RTC_CMP_bm);
 }
 
 void shortBusyDelay() {
@@ -309,6 +143,7 @@ void shortBusyDelay() {
   }
 }
 
+// SECRET STORAGE
 bool isSecretKeyUninitialized() {
   for (uint8_t i = 0; i < KEY_LENGTH; ++i) {
     if (EEPROM.read(KEY_EEPROM_ADDR + i) != 0xFF) {
@@ -334,6 +169,7 @@ void loadSecretKeyFromEEPROM() {
   }
 }
 
+// HMAC PREPARATION
 void prepareHMACPads() {
   memset(i_key_pad, 0x36, sizeof(i_key_pad));
   memset(o_key_pad, 0x5C, sizeof(o_key_pad));
@@ -344,6 +180,7 @@ void prepareHMACPads() {
   }
 }
 
+// TOTP GENERATION
 uint32_t generateTOTP(uint32_t time) {
   uint64_t counter = time / timestep;
 
@@ -365,8 +202,9 @@ uint32_t generateTOTP(uint32_t time) {
   hash.update(tempHash, sizeof(tempHash));
   hash.finalize(finalHash, sizeof(finalHash));
 
-  const int offset = finalHash[19] & 0x0F;
-  const uint32_t binary =
+  int offset = finalHash[19] & 0x0F;
+
+  uint32_t binary =
       ((uint32_t)(finalHash[offset] & 0x7F) << 24) |
       ((uint32_t)(finalHash[offset + 1] & 0xFF) << 16) |
       ((uint32_t)(finalHash[offset + 2] & 0xFF) << 8) |
@@ -375,6 +213,7 @@ uint32_t generateTOTP(uint32_t time) {
   return binary % 1000000;
 }
 
+// DISPLAY TOTP CODE
 void displayCode(uint32_t code, uint32_t currentSeconds) {
   char text[7];
   char debugLine[24];
@@ -415,8 +254,8 @@ void displayCode(uint32_t code, uint32_t currentSeconds) {
 
   for (const uint8_t *candidateFont : candidateFonts) {
     u8g2.setFont(candidateFont);
-    const int width = u8g2.getStrWidth(text);
-    const int height = u8g2.getAscent() - u8g2.getDescent();
+    int width = u8g2.getStrWidth(text);
+    int height = u8g2.getAscent() - u8g2.getDescent();
 
     if (width <= (displayWidth - 2 * codeHorizontalPadding) &&
         height <= codeAreaHeight) {
@@ -434,37 +273,40 @@ void displayCode(uint32_t code, uint32_t currentSeconds) {
 
     u8g2.setFont(codeFont);
 
-    const int textWidth = u8g2.getStrWidth(text);
-    const int codeHeight = u8g2.getAscent() - u8g2.getDescent();
-    const int x = (displayWidth - textWidth) / 2;
-    const int y = codeTop + ((codeAreaHeight - codeHeight) / 2) + u8g2.getAscent();
+    int textWidth = u8g2.getStrWidth(text);
+    int codeHeight = u8g2.getAscent() - u8g2.getDescent();
+    int x = (displayWidth - textWidth) / 2;
+    int y = codeTop + ((codeAreaHeight - codeHeight) / 2) + u8g2.getAscent();
 
     u8g2.drawStr(x, y, text);
   } while (u8g2.nextPage());
 }
 
+// CLEAR DISPLAY
 void clearDisplay() {
   u8g2.firstPage();
   do {
   } while (u8g2.nextPage());
 }
 
+// BUTTON INTERRUPT
 void buttonISR() {
   buttonPressed = true;
 }
 
+// UART PROVISIONING
 bool tryReadProvisionedKey(uint8_t *newKey) {
   if (Serial.available() <= 0) {
     return false;
   }
 
-  const int firstByte = Serial.read();
+  int firstByte = Serial.read();
   if (firstByte != PROVISIONING_MARKER) {
     return false;
   }
 
   uint8_t bytesRead = 0;
-  const uint32_t timeoutStart = getRTCSeconds();
+  uint32_t timeoutStart = getRTCSeconds();
 
   while (bytesRead < KEY_LENGTH && (getRTCSeconds() - timeoutStart) < 2) {
     if (Serial.available() > 0) {
@@ -489,6 +331,7 @@ void handleUARTProvisioning() {
   Serial.println("Secret key updated");
 }
 
+// ENTER SLEEP MODE
 void enterSleep() {
   set_sleep_mode(SLEEP_MODE_STANDBY);
   sleep_enable();
@@ -496,16 +339,23 @@ void enterSleep() {
   sleep_disable();
 }
 
+// SETUP
 void setup() {
-  beginDisplay();
+  sei();
+
+  u8g2.begin();
+  u8g2.setContrast(0x90);
   displayMessage("RTC source:", "waiting for EXT");
 
-  beginSerial();
+  Serial.swap(1);
+  Serial.begin(9600, SERIAL_HALF_DUPLEX);
+  PORTA.PIN1CTRL |= PORT_PULLUPEN_bm;
   Serial.println("RTC source: waiting for external crystal");
 
   setupRTC();
 
-  configureWakeButton();
+  pinMode(PIN_BUTTON, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(PIN_BUTTON), buttonISR, FALLING);
 
   loadSecretKeyFromEEPROM();
   prepareHMACPads();
@@ -514,29 +364,31 @@ void setup() {
   displayMessage("RTC source:", "external crystal");
   shortBusyDelay();
   clearDisplay();
-  prepareLowPowerSleep();
-  sei();
 }
 
+// MAIN LOOP
 void loop() {
-  beginSerial();
   pollRTCState();
   handleUARTProvisioning();
 
   if (buttonPressed) {
     buttonPressed = false;
 
-    beginDisplay();
-    pollRTCState();
-    const uint32_t currentSeconds = getRTCSeconds();
-    const uint32_t code = generateTOTP(currentSeconds);
+    uint32_t startLoopTime = getRTCSeconds();
 
-    displayCode(code, currentSeconds);
-    sleepForRtcSeconds(DISPLAY_WINDOW_SECONDS);
+    while ((getRTCSeconds() - startLoopTime) < 30) {
+      pollRTCState();
+      handleUARTProvisioning();
+
+      uint32_t currentSeconds = getRTCSeconds();
+      uint32_t code = generateTOTP(currentSeconds);
+
+      displayCode(code, currentSeconds);
+      shortBusyDelay();
+    }
+
     clearDisplay();
-    buttonPressed = false;
   }
 
-  prepareLowPowerSleep();
   enterSleep();
 }
