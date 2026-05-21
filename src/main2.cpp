@@ -29,20 +29,36 @@
 #define TOKEN_FIRMWARE_VERSION "token-main2-1.0"
 #endif
 
+#ifndef UART_ADMIN_WINDOW_SECONDS
+#define UART_ADMIN_WINDOW_SECONDS 300UL
+#endif
+
+#ifndef RTC_CRYSTAL_STARTUP_TIMEOUT_MS
+#define RTC_CRYSTAL_STARTUP_TIMEOUT_MS 2000UL
+#endif
+
 // DISPLAY
 U8G2_ST7305_200X200_1_4W_SW_SPI u8g2(
-    U8G2_R0, PIN_CLK, PIN_MOSI, PIN_CS, PIN_DC, PIN_RST);
+    U8G2_R2, PIN_CLK, PIN_MOSI, PIN_CS, PIN_DC, PIN_RST);
 
 // TOTP CONFIG
 constexpr uint8_t KEY_LENGTH = 20;
+constexpr uint8_t CHALLENGE_LENGTH = 16;
+constexpr uint8_t SHA1_DIGEST_LENGTH = 20;
 constexpr uint8_t KEY_EEPROM_ADDR = 0;
 constexpr uint8_t TIMESTEP_EEPROM_ADDR = KEY_EEPROM_ADDR + KEY_LENGTH;
 constexpr uint8_t PROVISIONED_EEPROM_ADDR = TIMESTEP_EEPROM_ADDR + 4;
 constexpr uint8_t PROVISIONED_MARKER = 0xA5;
 constexpr uint32_t DEFAULT_TOTP_TIMESTEP_SECONDS = TOTP_TIMESTEP_SECONDS;
+constexpr uint32_t UART_ADMIN_WINDOW_SECONDS_VALUE = UART_ADMIN_WINDOW_SECONDS;
+constexpr uint32_t RTC_CRYSTAL_STARTUP_TIMEOUT_MS_VALUE =
+    RTC_CRYSTAL_STARTUP_TIMEOUT_MS;
 constexpr uint16_t DISPLAY_WINDOW_SECONDS = 30;
 constexpr uint32_t RTC_OVERFLOW_SECONDS = 65536UL;
 constexpr uint16_t LCD_POWER_SETTLE_MS = 20;
+constexpr uint16_t RESET_MODE_LONG_PRESS_MS = 1200;
+constexpr uint16_t RESET_MODE_REFRESH_MS = 250;
+constexpr uint16_t FEEDBACK_DISPLAY_MS = 3000;
 const uint8_t defaultSecretKey[KEY_LENGTH] = {
     '1', '2', '3', '4', '5', '6', '7', '8', '9', '0',
     '1', '2', '3', '4', '5', '6', '7', '8', '9', '0'};
@@ -54,6 +70,7 @@ uint8_t o_key_pad[64];
 uint32_t activeTimestep = DEFAULT_TOTP_TIMESTEP_SECONDS;
 volatile bool buttonPressed = false;
 volatile uint32_t totalSeconds = 0;
+volatile uint32_t elapsedOffsetSeconds = 0;
 volatile bool rtcCompareMatched = false;
 bool rtcUsingExternalCrystal = false;
 volatile uint16_t rtcCountSnapshot = 0;
@@ -62,6 +79,9 @@ volatile uint8_t rtcIntFlagsSnapshot = 0;
 bool lcdPowerEnabled = false;
 char uartLineBuffer[96];
 uint8_t uartLineLength = 0;
+uint32_t uartAdminAwakeUntil = 0;
+char displayFeedback[22] = "";
+uint32_t displayFeedbackUntilMs = 0;
 
 void buttonISR();
 void prepareHMACPads();
@@ -277,7 +297,8 @@ void configureWakeButton() {
 void beginSerial() {
   Serial.swap(1);
   Serial.begin(9600, SERIAL_HALF_DUPLEX);
-  PORTA.PIN1CTRL |= PORT_PULLUPEN_bm;
+  PORTA.PIN1CTRL = PORT_PULLUPEN_bm;
+  PORTA.PIN2CTRL = PORT_PULLUPEN_bm;
 }
 
 void prepareLowPowerSleep() {
@@ -316,14 +337,39 @@ void setupRTC() {
 
   while (RTC.STATUS & RTC_CTRLABUSY_bm) {
   }
-  while ((CLKCTRL.MCLKSTATUS & CLKCTRL_XOSC32KS_bm) == 0) {
+
+  const uint32_t crystalWaitStart = millis();
+  while ((CLKCTRL.MCLKSTATUS & CLKCTRL_XOSC32KS_bm) == 0 &&
+         (millis() - crystalWaitStart) < RTC_CRYSTAL_STARTUP_TIMEOUT_MS_VALUE) {
+    delay(1);
   }
 
-  rtcUsingExternalCrystal = true;
+  if ((CLKCTRL.MCLKSTATUS & CLKCTRL_XOSC32KS_bm) != 0) {
+    rtcUsingExternalCrystal = true;
+    pollRTCState();
+    return;
+  }
+
+  RTC.CTRLA = 0;
+  while (RTC.STATUS > 0) {
+  }
+  RTC.INTCTRL = 0;
+  RTC.INTFLAGS = RTC_OVF_bm | RTC_CMP_bm;
+  RTC.CLKSEL = RTC_CLKSEL_INT32K_gc;
+  RTC.PER = 0xFFFF;
+  RTC.CNT = 0;
+  while (RTC.STATUS > 0) {
+  }
+  RTC.INTCTRL = RTC_OVF_bm;
+  RTC.CTRLA = RTC_PRESCALER_DIV32768_gc | RTC_RTCEN_bm | RTC_RUNSTDBY_bm;
+  while (RTC.STATUS & RTC_CTRLABUSY_bm) {
+  }
+
+  rtcUsingExternalCrystal = false;
   pollRTCState();
 }
 
-uint32_t getRTCSeconds() {
+uint32_t getRTCRawSeconds() {
   uint32_t overflowSecondsSnapshot;
   uint16_t currentCountSnapshot;
   uint8_t rtcFlagsSnapshot;
@@ -339,6 +385,20 @@ uint32_t getRTCSeconds() {
   }
 
   return overflowSecondsSnapshot + currentCountSnapshot;
+}
+
+uint32_t getRTCSeconds() {
+  const uint32_t rawSeconds = getRTCRawSeconds();
+  uint32_t offsetSnapshot;
+
+  ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
+    offsetSnapshot = elapsedOffsetSeconds;
+  }
+
+  if (rawSeconds < offsetSnapshot) {
+    return 0;
+  }
+  return rawSeconds - offsetSnapshot;
 }
 
 void sleepForRtcSeconds(uint16_t seconds) {
@@ -546,6 +606,53 @@ void displayCode(uint32_t code, uint32_t currentSeconds) {
   } while (u8g2.nextPage());
 }
 
+void displayResetMode() {
+  char codeLine[7];
+  char elapsedLine[24];
+  char rawLine[24];
+  char countLine[24];
+  const char *registrationLine = isProvisioned() ? "REGISTERED YES"
+                                                 : "REGISTERED NO";
+  uint16_t counterSnapshot;
+  uint32_t rawSeconds = getRTCRawSeconds();
+  uint32_t elapsedSeconds = getRTCSeconds();
+  const uint32_t code = generateTOTP(elapsedSeconds);
+
+  ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
+    counterSnapshot = rtcCountSnapshot;
+  }
+
+  sprintf(codeLine, "%06lu", code);
+  sprintf(elapsedLine, "ELAPSED %lu", elapsedSeconds);
+  sprintf(rawLine, "RAW %lu", rawSeconds);
+  sprintf(countLine, "CNT %u", (unsigned int)counterSnapshot);
+
+  u8g2.firstPage();
+  do {
+    u8g2.setFont(u8g2_font_6x12_tf);
+    const char *feedback = feedbackActive() ? displayFeedback : "UART READY";
+    const int feedbackWidth = u8g2.getStrWidth(feedback);
+    const int registrationWidth = u8g2.getStrWidth(registrationLine);
+    u8g2.drawStr((200 - feedbackWidth) / 2, 22, feedback);
+    u8g2.drawStr((200 - registrationWidth) / 2, 42, registrationLine);
+
+    u8g2.drawStr(88, 62, "CODE");
+
+    u8g2.setFont(u8g2_font_logisoso32_tn);
+    int codeWidth = u8g2.getStrWidth(codeLine);
+    u8g2.drawStr((200 - codeWidth) / 2, 104, codeLine);
+
+    u8g2.setFont(u8g2_font_6x12_tf);
+    int elapsedWidth = u8g2.getStrWidth(elapsedLine);
+    int rawWidth = u8g2.getStrWidth(rawLine);
+    int countWidth = u8g2.getStrWidth(countLine);
+    u8g2.drawStr((200 - elapsedWidth) / 2, 128, elapsedLine);
+    u8g2.drawStr((200 - rawWidth) / 2, 144, rawLine);
+    u8g2.drawStr((200 - countWidth) / 2, 160, countLine);
+    u8g2.drawStr(46, 184, "HOLD TO EXIT");
+  } while (u8g2.nextPage());
+}
+
 void clearDisplay() {
   u8g2.firstPage();
   do {
@@ -556,19 +663,54 @@ void buttonISR() {
   buttonPressed = true;
 }
 
+bool consumeButtonPress() {
+  if (!buttonPressed) {
+    return false;
+  }
+
+  buttonPressed = false;
+  return true;
+}
+
+bool buttonIsDown() {
+  return digitalRead(PIN_BUTTON) == LOW;
+}
+
+void setDisplayFeedback(const char *message) {
+  strncpy(displayFeedback, message, sizeof(displayFeedback) - 1);
+  displayFeedback[sizeof(displayFeedback) - 1] = '\0';
+  displayFeedbackUntilMs = millis() + FEEDBACK_DISPLAY_MS;
+}
+
+bool feedbackActive() {
+  return displayFeedback[0] != '\0' &&
+         static_cast<int32_t>(displayFeedbackUntilMs - millis()) > 0;
+}
+
 void resetElapsedTime() {
+  const uint32_t rawSeconds = getRTCRawSeconds();
+
   ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
-    totalSeconds = 0;
+    elapsedOffsetSeconds = rawSeconds;
     rtcCompareMatched = false;
   }
 
-  while (RTC.STATUS & RTC_CNTBUSY_bm) {
-  }
-  RTC.CNT = 0;
-  while (RTC.STATUS & RTC_CNTBUSY_bm) {
-  }
-  RTC.INTFLAGS = RTC_OVF_bm | RTC_CMP_bm;
+  RTC.INTFLAGS = RTC_CMP_bm;
   pollRTCState();
+}
+
+void extendUARTAdminWindow() {
+  if (UART_ADMIN_WINDOW_SECONDS_VALUE == 0) {
+    return;
+  }
+  uartAdminAwakeUntil = getRTCSeconds() + UART_ADMIN_WINDOW_SECONDS_VALUE;
+}
+
+bool uartAdminWindowActive() {
+  if (UART_ADMIN_WINDOW_SECONDS_VALUE == 0) {
+    return false;
+  }
+  return static_cast<int32_t>(uartAdminAwakeUntil - getRTCSeconds()) > 0;
 }
 
 void sendProtocolError(const char *code, const char *message) {
@@ -591,12 +733,12 @@ int hexNibble(char value) {
   return -1;
 }
 
-bool parseSecretHex(const char *text, uint8_t *out) {
-  if (strlen(text) != KEY_LENGTH * 2) {
+bool parseHexBytes(const char *text, uint8_t *out, uint8_t length) {
+  if (strlen(text) != static_cast<size_t>(length) * 2) {
     return false;
   }
 
-  for (uint8_t i = 0; i < KEY_LENGTH; ++i) {
+  for (uint8_t i = 0; i < length; ++i) {
     const int high = hexNibble(text[i * 2]);
     const int low = hexNibble(text[i * 2 + 1]);
     if (high < 0 || low < 0) {
@@ -606,6 +748,31 @@ bool parseSecretHex(const char *text, uint8_t *out) {
   }
 
   return true;
+}
+
+bool parseSecretHex(const char *text, uint8_t *out) {
+  return parseHexBytes(text, out, KEY_LENGTH);
+}
+
+void printHexByte(uint8_t value) {
+  const char hex[] = "0123456789abcdef";
+  Serial.print(hex[value >> 4]);
+  Serial.print(hex[value & 0x0F]);
+}
+
+void computeChallengeResponse(const uint8_t *challenge, uint8_t challengeLength,
+                              uint8_t *response) {
+  uint8_t tempHash[SHA1_DIGEST_LENGTH];
+
+  hash.reset();
+  hash.update(i_key_pad, 64);
+  hash.update(challenge, challengeLength);
+  hash.finalize(tempHash, sizeof(tempHash));
+
+  hash.reset();
+  hash.update(o_key_pad, 64);
+  hash.update(tempHash, sizeof(tempHash));
+  hash.finalize(response, SHA1_DIGEST_LENGTH);
 }
 
 bool parseProvisionArgs(char *args, uint8_t *newKey, uint32_t *newTimestep) {
@@ -630,6 +797,36 @@ bool parseProvisionArgs(char *args, uint8_t *newKey, uint32_t *newTimestep) {
   return true;
 }
 
+void printRTCState() {
+  uint16_t counterSnapshot;
+  uint8_t statusSnapshot;
+  uint8_t intFlagsSnapshot;
+  uint32_t overflowSnapshot;
+
+  pollRTCState();
+  ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
+    counterSnapshot = rtcCountSnapshot;
+    statusSnapshot = rtcStatusSnapshot;
+    intFlagsSnapshot = rtcIntFlagsSnapshot;
+    overflowSnapshot = totalSeconds;
+  }
+
+  Serial.print("OK RTC RAW=");
+  Serial.print(getRTCRawSeconds());
+  Serial.print(" ELAPSED=");
+  Serial.print(getRTCSeconds());
+  Serial.print(" CNT=");
+  Serial.print(counterSnapshot);
+  Serial.print(" OVF=");
+  Serial.print(overflowSnapshot);
+  Serial.print(" STATUS=");
+  Serial.print(statusSnapshot);
+  Serial.print(" FLAGS=");
+  Serial.print(intFlagsSnapshot);
+  Serial.print(" CLK=");
+  Serial.println(rtcUsingExternalCrystal ? "EXT" : "INT");
+}
+
 void processUARTCommand(char *line) {
   if (line[0] == '\0') {
     return;
@@ -651,9 +848,40 @@ void processUARTCommand(char *line) {
     return;
   }
 
+  if (strcmp(line, "READ_RTC") == 0) {
+    printRTCState();
+    return;
+  }
+
+  if (strncmp(line, "CHALLENGE ", 10) == 0) {
+    uint8_t challenge[CHALLENGE_LENGTH];
+    uint8_t response[SHA1_DIGEST_LENGTH];
+    if (!parseHexBytes(line + 10, challenge, CHALLENGE_LENGTH)) {
+      sendProtocolError("BAD_ARGS", "Expected CHALLENGE <32_HEX_NONCE>");
+      return;
+    }
+
+    computeChallengeResponse(challenge, CHALLENGE_LENGTH, response);
+    Serial.print("OK CHALLENGE ");
+    for (uint8_t i = 0; i < SHA1_DIGEST_LENGTH; ++i) {
+      printHexByte(response[i]);
+    }
+    Serial.print(" PROVISIONED=");
+    Serial.println(isProvisioned() ? "1" : "0");
+    return;
+  }
+
   if (strcmp(line, "RESET_TIME") == 0) {
     resetElapsedTime();
+    setDisplayFeedback("TIMER RESET");
     Serial.println("OK RESET_TIME");
+    return;
+  }
+
+  if (strcmp(line, "UNREGISTER") == 0) {
+    writeProvisionedMarker(false);
+    setDisplayFeedback("UNREGISTERED");
+    Serial.println("OK UNREGISTER");
     return;
   }
 
@@ -666,6 +894,7 @@ void processUARTCommand(char *line) {
     }
 
     storeProvisioning(newKey, newTimestep, true);
+    setDisplayFeedback("REGISTERED");
     Serial.println("OK PROVISION");
     return;
   }
@@ -680,6 +909,7 @@ void processUARTCommand(char *line) {
 
     resetElapsedTime();
     storeProvisioning(newKey, newTimestep, true);
+    setDisplayFeedback("REGISTERED");
     Serial.println("OK RESET_ALL");
     return;
   }
@@ -687,7 +917,9 @@ void processUARTCommand(char *line) {
   sendProtocolError("UNKNOWN", "Unsupported command");
 }
 
-void handleUARTCommands() {
+bool handleUARTCommands() {
+  bool processedCommand = false;
+
   while (Serial.available() > 0) {
     const char incoming = static_cast<char>(Serial.read());
 
@@ -699,17 +931,21 @@ void handleUARTCommands() {
       uartLineBuffer[uartLineLength] = '\0';
       processUARTCommand(uartLineBuffer);
       uartLineLength = 0;
+      processedCommand = true;
       continue;
     }
 
     if (uartLineLength >= sizeof(uartLineBuffer) - 1) {
       uartLineLength = 0;
       sendProtocolError("LINE_TOO_LONG", "Command line too long");
+      processedCommand = true;
       continue;
     }
 
     uartLineBuffer[uartLineLength++] = incoming;
   }
+
+  return processedCommand;
 }
 
 void enterSleep() {
@@ -734,31 +970,136 @@ void setup() {
   loadProvisioningFromEEPROM();
   prepareHMACPads();
 
-  Serial.println("RTC source: external 32.768kHz crystal");
-  displayMessage("RTC source:", "external crystal");
+  Serial.print("RTC source: ");
+  Serial.println(rtcUsingExternalCrystal ? "external 32.768kHz crystal"
+                                         : "internal 32kHz clock");
+  displayMessage("RTC source:",
+                 rtcUsingExternalCrystal ? "external crystal" : "internal clock");
   shortBusyDelay();
   clearDisplay();
   prepareLowPowerSleep();
   sei();
 }
 
+void runResetMode() {
+  beginSerial();
+  beginDisplay();
+  setDisplayFeedback("RESET MODE");
+  buttonPressed = false;
+
+  bool readyForExitPress = !buttonIsDown();
+  bool trackingExitPress = false;
+  uint32_t exitPressStartedMs = 0;
+  uint32_t nextRefreshMs = 0;
+
+  while (true) {
+    beginSerial();
+    pollRTCState();
+    if (handleUARTCommands()) {
+      extendUARTAdminWindow();
+    }
+
+    const bool buttonDown = buttonIsDown();
+    if (!readyForExitPress) {
+      if (!buttonDown) {
+        readyForExitPress = true;
+      }
+      buttonPressed = false;
+    } else if (!trackingExitPress && (buttonPressed || buttonDown)) {
+      buttonPressed = false;
+      if (buttonDown) {
+        trackingExitPress = true;
+        exitPressStartedMs = millis();
+      }
+    } else if (trackingExitPress) {
+      if (!buttonDown) {
+        trackingExitPress = false;
+      } else if ((millis() - exitPressStartedMs) >= RESET_MODE_LONG_PRESS_MS) {
+        break;
+      }
+    }
+
+    const uint32_t now = millis();
+    if (static_cast<int32_t>(now - nextRefreshMs) >= 0) {
+      displayResetMode();
+      nextRefreshMs = now + RESET_MODE_REFRESH_MS;
+    }
+
+    delay(10);
+  }
+
+  clearDisplay();
+  shutdownDisplay();
+  buttonPressed = false;
+  displayFeedback[0] = '\0';
+}
+
 void loop() {
   beginSerial();
   pollRTCState();
-  handleUARTCommands();
+  if (handleUARTCommands()) {
+    extendUARTAdminWindow();
+  }
 
-  if (buttonPressed) {
-    buttonPressed = false;
-
+  if (consumeButtonPress()) {
     beginDisplay();
     pollRTCState();
     const uint32_t currentSeconds = getRTCSeconds();
     const uint32_t code = generateTOTP(currentSeconds);
 
     displayCode(code, currentSeconds);
-    sleepForRtcSeconds(DISPLAY_WINDOW_SECONDS);
-    clearDisplay();
     buttonPressed = false;
+    const uint32_t displayUntil = getRTCSeconds() + DISPLAY_WINDOW_SECONDS;
+    bool readyForDisplayPress = !buttonIsDown();
+    bool trackingDisplayPress = false;
+    uint32_t displayPressStartedMs = 0;
+    uint32_t nextRefreshMs = millis() + RESET_MODE_REFRESH_MS;
+
+    while (static_cast<int32_t>(displayUntil - getRTCSeconds()) > 0) {
+      pollRTCState();
+      if (handleUARTCommands()) {
+        extendUARTAdminWindow();
+      }
+
+      const bool buttonDown = buttonIsDown();
+      if (!readyForDisplayPress) {
+        if (!buttonDown) {
+          readyForDisplayPress = true;
+        }
+        buttonPressed = false;
+      } else if (!trackingDisplayPress && (buttonPressed || buttonDown)) {
+        buttonPressed = false;
+        if (buttonDown) {
+          trackingDisplayPress = true;
+          displayPressStartedMs = millis();
+        }
+      } else if (trackingDisplayPress) {
+        if (!buttonDown) {
+          break;
+        }
+        if ((millis() - displayPressStartedMs) >= RESET_MODE_LONG_PRESS_MS) {
+          runResetMode();
+          return;
+        }
+      }
+
+      const uint32_t now = millis();
+      if (static_cast<int32_t>(now - nextRefreshMs) >= 0) {
+        const uint32_t refreshedSeconds = getRTCSeconds();
+        displayCode(generateTOTP(refreshedSeconds), refreshedSeconds);
+        nextRefreshMs = now + RESET_MODE_REFRESH_MS;
+      }
+
+      delay(10);
+    }
+
+    clearDisplay();
+    shutdownDisplay();
+  }
+
+  if (uartAdminWindowActive()) {
+    delay(10);
+    return;
   }
 
   prepareLowPowerSleep();
