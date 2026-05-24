@@ -26,7 +26,7 @@
 #endif
 
 #ifndef TOKEN_FIRMWARE_VERSION
-#define TOKEN_FIRMWARE_VERSION "token-main2-1.0"
+#define TOKEN_FIRMWARE_VERSION "token-main3-3profile-1.0"
 #endif
 
 #ifndef UART_ADMIN_WINDOW_SECONDS
@@ -45,9 +45,12 @@ U8G2_ST7305_200X200_1_4W_SW_SPI u8g2(
 constexpr uint8_t KEY_LENGTH = 20;
 constexpr uint8_t CHALLENGE_LENGTH = 16;
 constexpr uint8_t SHA1_DIGEST_LENGTH = 20;
-constexpr uint8_t KEY_EEPROM_ADDR = 0;
-constexpr uint8_t TIMESTEP_EEPROM_ADDR = KEY_EEPROM_ADDR + KEY_LENGTH;
-constexpr uint8_t PROVISIONED_EEPROM_ADDR = TIMESTEP_EEPROM_ADDR + 4;
+constexpr uint8_t PROFILE_COUNT = 3;
+constexpr uint16_t PROFILE_EEPROM_BYTES = KEY_LENGTH + 4 + 4 + 1;
+constexpr uint16_t KEY_EEPROM_ADDR = 0;
+constexpr uint16_t TIMESTEP_EEPROM_OFFSET = KEY_LENGTH;
+constexpr uint16_t ELAPSED_OFFSET_EEPROM_OFFSET = TIMESTEP_EEPROM_OFFSET + 4;
+constexpr uint16_t PROVISIONED_EEPROM_OFFSET = ELAPSED_OFFSET_EEPROM_OFFSET + 4;
 constexpr uint8_t PROVISIONED_MARKER = 0xA5;
 constexpr uint32_t DEFAULT_TOTP_TIMESTEP_SECONDS = TOTP_TIMESTEP_SECONDS;
 constexpr uint32_t UART_ADMIN_WINDOW_SECONDS_VALUE = UART_ADMIN_WINDOW_SECONDS;
@@ -57,20 +60,24 @@ constexpr uint16_t DISPLAY_WINDOW_SECONDS = 30;
 constexpr uint32_t RTC_OVERFLOW_SECONDS = 65536UL;
 constexpr uint16_t LCD_POWER_SETTLE_MS = 20;
 constexpr uint16_t RESET_MODE_LONG_PRESS_MS = 1200;
+constexpr uint16_t BUTTON_DEBOUNCE_MS = 45;
+constexpr uint16_t RESET_MODE_ARM_WINDOW_MS = 12000;
 constexpr uint16_t RESET_MODE_REFRESH_MS = 250;
 constexpr uint16_t FEEDBACK_DISPLAY_MS = 3000;
-const uint8_t defaultSecretKey[KEY_LENGTH] = {
-    '1', '2', '3', '4', '5', '6', '7', '8', '9', '0',
-    '1', '2', '3', '4', '5', '6', '7', '8', '9', '0'};
 
 SHA1 hash;
+uint8_t profileSecretKeys[PROFILE_COUNT][KEY_LENGTH];
+uint32_t profileTimesteps[PROFILE_COUNT];
+uint32_t profileElapsedOffsets[PROFILE_COUNT];
+bool profileProvisioned[PROFILE_COUNT];
 uint8_t activeSecretKey[KEY_LENGTH];
 uint8_t i_key_pad[64];
 uint8_t o_key_pad[64];
 uint32_t activeTimestep = DEFAULT_TOTP_TIMESTEP_SECONDS;
+uint8_t activeProfileIndex = 0;
 volatile bool buttonPressed = false;
+uint32_t lastButtonEventMs = 0;
 volatile uint32_t totalSeconds = 0;
-volatile uint32_t elapsedOffsetSeconds = 0;
 volatile bool rtcCompareMatched = false;
 bool rtcUsingExternalCrystal = false;
 volatile uint16_t rtcCountSnapshot = 0;
@@ -82,9 +89,12 @@ uint8_t uartLineLength = 0;
 uint32_t uartAdminAwakeUntil = 0;
 char displayFeedback[22] = "";
 uint32_t displayFeedbackUntilMs = 0;
+bool resetModeActive = false;
+uint32_t resetModeArmedUntilMs = 0;
 
 void buttonISR();
 void prepareHMACPads();
+bool isProfileProvisioned(uint8_t profileIndex);
 
 #define DISABLE_PORT_INPUTS(port)                                               \
   do {                                                                          \
@@ -387,12 +397,13 @@ uint32_t getRTCRawSeconds() {
   return overflowSecondsSnapshot + currentCountSnapshot;
 }
 
-uint32_t getRTCSeconds() {
+uint32_t getProfileElapsedSeconds(uint8_t profileIndex) {
   const uint32_t rawSeconds = getRTCRawSeconds();
-  uint32_t offsetSnapshot;
+  const uint8_t safeProfile = profileIndex < PROFILE_COUNT ? profileIndex : 0;
+  const uint32_t offsetSnapshot = profileElapsedOffsets[safeProfile];
 
-  ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
-    offsetSnapshot = elapsedOffsetSeconds;
+  if (!isProfileProvisioned(safeProfile)) {
+    return 0;
   }
 
   if (rawSeconds < offsetSnapshot) {
@@ -400,6 +411,8 @@ uint32_t getRTCSeconds() {
   }
   return rawSeconds - offsetSnapshot;
 }
+
+uint32_t getRTCSeconds() { return getProfileElapsedSeconds(activeProfileIndex); }
 
 void sleepForRtcSeconds(uint16_t seconds) {
   rtcCompareMatched = false;
@@ -430,33 +443,32 @@ void shortBusyDelay() {
   }
 }
 
-bool isSecretKeyUninitialized() {
-  for (uint8_t i = 0; i < KEY_LENGTH; ++i) {
-    if (EEPROM.read(KEY_EEPROM_ADDR + i) != 0xFF) {
-      return false;
-    }
-  }
-  return true;
+uint16_t profileEEPROMBase(uint8_t profileIndex) {
+  return KEY_EEPROM_ADDR +
+         static_cast<uint16_t>(profileIndex) * PROFILE_EEPROM_BYTES;
 }
 
-void writeSecretKeyToEEPROM(const uint8_t *key) {
+void writeProfileSecretKeyToEEPROM(uint8_t profileIndex, const uint8_t *key) {
+  const uint16_t base = profileEEPROMBase(profileIndex);
   for (uint8_t i = 0; i < KEY_LENGTH; ++i) {
-    EEPROM.update(KEY_EEPROM_ADDR + i, key[i]);
+    EEPROM.update(base + i, key[i]);
   }
 }
 
-void writeTimestepToEEPROM(uint32_t timestepSeconds) {
+void writeProfileTimestepToEEPROM(uint8_t profileIndex,
+                                  uint32_t timestepSeconds) {
+  const uint16_t base = profileEEPROMBase(profileIndex) + TIMESTEP_EEPROM_OFFSET;
   for (uint8_t i = 0; i < 4; ++i) {
-    EEPROM.update(TIMESTEP_EEPROM_ADDR + i,
+    EEPROM.update(base + i,
                   static_cast<uint8_t>((timestepSeconds >> (8 * i)) & 0xFF));
   }
 }
 
-uint32_t readTimestepFromEEPROM() {
+uint32_t readProfileTimestepFromEEPROM(uint8_t profileIndex) {
+  const uint16_t base = profileEEPROMBase(profileIndex) + TIMESTEP_EEPROM_OFFSET;
   uint32_t stored = 0;
   for (uint8_t i = 0; i < 4; ++i) {
-    stored |= static_cast<uint32_t>(EEPROM.read(TIMESTEP_EEPROM_ADDR + i))
-              << (8 * i);
+    stored |= static_cast<uint32_t>(EEPROM.read(base + i)) << (8 * i);
   }
 
   if (stored == 0xFFFFFFFFUL || stored == 0 || stored > 3600UL) {
@@ -465,35 +477,104 @@ uint32_t readTimestepFromEEPROM() {
   return stored;
 }
 
-bool isProvisioned() {
-  return EEPROM.read(PROVISIONED_EEPROM_ADDR) == PROVISIONED_MARKER;
+void writeProfileElapsedOffsetToEEPROM(uint8_t profileIndex, uint32_t offset) {
+  const uint16_t base =
+      profileEEPROMBase(profileIndex) + ELAPSED_OFFSET_EEPROM_OFFSET;
+  for (uint8_t i = 0; i < 4; ++i) {
+    EEPROM.update(base + i, static_cast<uint8_t>((offset >> (8 * i)) & 0xFF));
+  }
+}
+
+uint32_t readProfileElapsedOffsetFromEEPROM(uint8_t profileIndex) {
+  const uint16_t base =
+      profileEEPROMBase(profileIndex) + ELAPSED_OFFSET_EEPROM_OFFSET;
+  uint32_t stored = 0;
+  for (uint8_t i = 0; i < 4; ++i) {
+    stored |= static_cast<uint32_t>(EEPROM.read(base + i)) << (8 * i);
+  }
+
+  if (stored == 0xFFFFFFFFUL) {
+    return 0;
+  }
+  return stored;
+}
+
+bool isProfileProvisioned(uint8_t profileIndex) {
+  return profileProvisioned[profileIndex < PROFILE_COUNT ? profileIndex : 0];
+}
+
+bool isProvisioned() { return isProfileProvisioned(activeProfileIndex); }
+
+void writeProfileProvisionedMarker(uint8_t profileIndex, bool provisioned) {
+  const uint16_t addr = profileEEPROMBase(profileIndex) + PROVISIONED_EEPROM_OFFSET;
+  EEPROM.update(addr, provisioned ? PROVISIONED_MARKER : 0x00);
+  profileProvisioned[profileIndex] = provisioned;
 }
 
 void writeProvisionedMarker(bool provisioned) {
-  EEPROM.update(PROVISIONED_EEPROM_ADDR, provisioned ? PROVISIONED_MARKER : 0x00);
+  writeProfileProvisionedMarker(activeProfileIndex, provisioned);
 }
 
 void storeProvisioning(const uint8_t *key, uint32_t timestepSeconds,
                        bool provisioned) {
-  writeSecretKeyToEEPROM(key);
-  writeTimestepToEEPROM(timestepSeconds);
-  writeProvisionedMarker(provisioned);
+  writeProfileSecretKeyToEEPROM(activeProfileIndex, key);
+  writeProfileTimestepToEEPROM(activeProfileIndex, timestepSeconds);
+  writeProfileProvisionedMarker(activeProfileIndex, provisioned);
+  memcpy(profileSecretKeys[activeProfileIndex], key, KEY_LENGTH);
+  profileTimesteps[activeProfileIndex] = timestepSeconds;
   memcpy(activeSecretKey, key, KEY_LENGTH);
   activeTimestep = timestepSeconds;
   prepareHMACPads();
 }
 
+void loadActiveProfileCrypto() {
+  memcpy(activeSecretKey, profileSecretKeys[activeProfileIndex], KEY_LENGTH);
+  activeTimestep = profileTimesteps[activeProfileIndex];
+  prepareHMACPads();
+}
+
+void selectActiveProfile(uint8_t profileIndex) {
+  activeProfileIndex = profileIndex % PROFILE_COUNT;
+  loadActiveProfileCrypto();
+}
+
+void clearActiveProfile() {
+  uint8_t blankKey[KEY_LENGTH] = {0};
+  const uint32_t rawSeconds = getRTCRawSeconds();
+
+  writeProfileSecretKeyToEEPROM(activeProfileIndex, blankKey);
+  writeProfileTimestepToEEPROM(activeProfileIndex,
+                               DEFAULT_TOTP_TIMESTEP_SECONDS);
+  writeProfileElapsedOffsetToEEPROM(activeProfileIndex, rawSeconds);
+  writeProfileProvisionedMarker(activeProfileIndex, false);
+
+  memset(profileSecretKeys[activeProfileIndex], 0, KEY_LENGTH);
+  profileTimesteps[activeProfileIndex] = DEFAULT_TOTP_TIMESTEP_SECONDS;
+  profileElapsedOffsets[activeProfileIndex] = rawSeconds;
+  loadActiveProfileCrypto();
+}
+
 void loadProvisioningFromEEPROM() {
-  if (isSecretKeyUninitialized()) {
-    writeSecretKeyToEEPROM(defaultSecretKey);
-    writeTimestepToEEPROM(DEFAULT_TOTP_TIMESTEP_SECONDS);
-    writeProvisionedMarker(false);
+  for (uint8_t profile = 0; profile < PROFILE_COUNT; ++profile) {
+    const uint16_t base = profileEEPROMBase(profile);
+
+    for (uint8_t i = 0; i < KEY_LENGTH; ++i) {
+      profileSecretKeys[profile][i] = EEPROM.read(base + i);
+    }
+
+    profileTimesteps[profile] = readProfileTimestepFromEEPROM(profile);
+    profileElapsedOffsets[profile] =
+        readProfileElapsedOffsetFromEEPROM(profile);
+    profileProvisioned[profile] =
+        EEPROM.read(base + PROVISIONED_EEPROM_OFFSET) == PROVISIONED_MARKER;
+
+    if (!profileProvisioned[profile]) {
+      memset(profileSecretKeys[profile], 0, KEY_LENGTH);
+      profileTimesteps[profile] = DEFAULT_TOTP_TIMESTEP_SECONDS;
+    }
   }
 
-  for (uint8_t i = 0; i < KEY_LENGTH; ++i) {
-    activeSecretKey[i] = EEPROM.read(KEY_EEPROM_ADDR + i);
-  }
-  activeTimestep = readTimestepFromEEPROM();
+  selectActiveProfile(0);
 }
 
 void prepareHMACPads() {
@@ -540,6 +621,7 @@ uint32_t generateTOTP(uint32_t time) {
 
 void displayCode(uint32_t code, uint32_t currentSeconds) {
   char text[7];
+  char profileLine[16];
   char debugLine[24];
   char counterLine[24];
   char statusLine[24];
@@ -555,6 +637,7 @@ void displayCode(uint32_t code, uint32_t currentSeconds) {
   }
 
   sprintf(text, "%06lu", code);
+  sprintf(profileLine, "Profile %u", activeProfileIndex + 1);
   sprintf(debugLine,
           "CLK:%s SEC:%lu",
           rtcUsingExternalCrystal ? "EXT" : "INT",
@@ -565,16 +648,20 @@ void displayCode(uint32_t code, uint32_t currentSeconds) {
 
   constexpr int displayWidth = 200;
   constexpr int displayHeight = 200;
-  constexpr int codeTop = 50;
+  constexpr int codeTop = 66;
   constexpr int codeBottomPadding = 6;
   constexpr int codeAreaHeight = displayHeight - codeTop - codeBottomPadding;
 
   u8g2.firstPage();
   do {
+    u8g2.setFont(u8g2_font_10x20_tf);
+    const int profileWidth = u8g2.getStrWidth(profileLine);
+    u8g2.drawStr((200 - profileWidth) / 2, 22, profileLine);
+
     u8g2.setFont(u8g2_font_6x12_tf);
-    u8g2.drawStr(8, 14, debugLine);
-    u8g2.drawStr(8, 28, counterLine);
-    u8g2.drawStr(8, 42, statusLine);
+    u8g2.drawStr(8, 40, debugLine);
+    u8g2.drawStr(8, 54, counterLine);
+    u8g2.drawStr(8, 68, statusLine);
 
     u8g2.setFont(codeFont);
 
@@ -587,23 +674,61 @@ void displayCode(uint32_t code, uint32_t currentSeconds) {
   } while (u8g2.nextPage());
 }
 
+void displayUnsetProfile() {
+  char profileLine[16];
+  sprintf(profileLine, "Profile %u", activeProfileIndex + 1);
+
+  u8g2.firstPage();
+  do {
+    u8g2.setFont(u8g2_font_10x20_tf);
+    int profileWidth = u8g2.getStrWidth(profileLine);
+    u8g2.drawStr((200 - profileWidth) / 2, 84, profileLine);
+
+    const char *unsetLine = "Not Set";
+    int unsetWidth = u8g2.getStrWidth(unsetLine);
+    u8g2.drawStr((200 - unsetWidth) / 2, 114, unsetLine);
+  } while (u8g2.nextPage());
+}
+
+void displayActiveProfile() {
+  pollRTCState();
+  if (!isProvisioned()) {
+    displayUnsetProfile();
+    return;
+  }
+
+  const uint32_t currentSeconds = getRTCSeconds();
+  displayCode(generateTOTP(currentSeconds), currentSeconds);
+}
+
+void cycleToNextProfile() {
+  selectActiveProfile((activeProfileIndex + 1) % PROFILE_COUNT);
+  displayFeedback[0] = '\0';
+}
+
 void displayResetMode() {
-  char codeLine[7];
+  char profileLine[16];
+  char codeLine[8];
   char elapsedLine[24];
   char rawLine[24];
   char countLine[24];
-  const char *registrationLine = isProvisioned() ? "REGISTERED YES"
-                                                 : "REGISTERED NO";
+  const bool provisioned = isProvisioned();
+  const char *registrationLine = provisioned ? "REGISTERED YES" : "NOT SET";
   uint16_t counterSnapshot;
   uint32_t rawSeconds = getRTCRawSeconds();
   uint32_t elapsedSeconds = getRTCSeconds();
-  const uint32_t code = generateTOTP(elapsedSeconds);
+  const uint32_t code = provisioned ? generateTOTP(elapsedSeconds) : 0;
 
   ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
     counterSnapshot = rtcCountSnapshot;
   }
 
-  sprintf(codeLine, "%06lu", code);
+  sprintf(profileLine, "Profile %u", activeProfileIndex + 1);
+  if (provisioned) {
+    sprintf(codeLine, "%06lu", code);
+  } else {
+    strcpy(codeLine, "Not Set");
+  }
   sprintf(elapsedLine, "ELAPSED %lu", elapsedSeconds);
   sprintf(rawLine, "RAW %lu", rawSeconds);
   sprintf(countLine, "CNT %u", (unsigned int)counterSnapshot);
@@ -613,13 +738,15 @@ void displayResetMode() {
     u8g2.setFont(u8g2_font_6x12_tf);
     const char *feedback = feedbackActive() ? displayFeedback : "UART READY";
     const int feedbackWidth = u8g2.getStrWidth(feedback);
+    const int profileWidth = u8g2.getStrWidth(profileLine);
     const int registrationWidth = u8g2.getStrWidth(registrationLine);
-    u8g2.drawStr((200 - feedbackWidth) / 2, 22, feedback);
-    u8g2.drawStr((200 - registrationWidth) / 2, 42, registrationLine);
+    u8g2.drawStr((200 - profileWidth) / 2, 16, profileLine);
+    u8g2.drawStr((200 - feedbackWidth) / 2, 34, feedback);
+    u8g2.drawStr((200 - registrationWidth) / 2, 52, registrationLine);
 
-    u8g2.drawStr(88, 62, "CODE");
+    u8g2.drawStr(88, 72, "CODE");
 
-    u8g2.setFont(u8g2_font_logisoso32_tn);
+    u8g2.setFont(provisioned ? u8g2_font_logisoso32_tn : u8g2_font_10x20_tf);
     int codeWidth = u8g2.getStrWidth(codeLine);
     u8g2.drawStr((200 - codeWidth) / 2, 104, codeLine);
 
@@ -650,11 +777,35 @@ bool consumeButtonPress() {
   }
 
   buttonPressed = false;
+  const uint32_t now = millis();
+  if (lastButtonEventMs != 0 &&
+      static_cast<int32_t>(now - lastButtonEventMs) < BUTTON_DEBOUNCE_MS) {
+    return false;
+  }
+  lastButtonEventMs = now;
   return true;
 }
 
 bool buttonIsDown() {
   return digitalRead(PIN_BUTTON) == LOW;
+}
+
+bool acceptButtonDownAsPressStart() {
+  const uint32_t now = millis();
+  if (lastButtonEventMs != 0 &&
+      static_cast<int32_t>(now - lastButtonEventMs) < BUTTON_DEBOUNCE_MS) {
+    return false;
+  }
+  lastButtonEventMs = now;
+  return true;
+}
+
+void armResetModeEntry() {
+  resetModeArmedUntilMs = millis() + RESET_MODE_ARM_WINDOW_MS;
+}
+
+bool resetModeEntryArmed() {
+  return static_cast<int32_t>(resetModeArmedUntilMs - millis()) > 0;
 }
 
 void setDisplayFeedback(const char *message) {
@@ -671,10 +822,10 @@ bool feedbackActive() {
 void resetElapsedTime() {
   const uint32_t rawSeconds = getRTCRawSeconds();
 
-  ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
-    elapsedOffsetSeconds = rawSeconds;
-    rtcCompareMatched = false;
-  }
+  profileElapsedOffsets[activeProfileIndex] = rawSeconds;
+  writeProfileElapsedOffsetToEEPROM(activeProfileIndex, rawSeconds);
+
+  ATOMIC_BLOCK(ATOMIC_RESTORESTATE) { rtcCompareMatched = false; }
 
   RTC.INTFLAGS = RTC_CMP_bm;
   pollRTCState();
@@ -808,6 +959,15 @@ void printRTCState() {
   Serial.println(rtcUsingExternalCrystal ? "EXT" : "INT");
 }
 
+bool requireResetModeForMutation() {
+  if (resetModeActive) {
+    return true;
+  }
+
+  sendProtocolError("RESET_MODE_REQUIRED", "Enter reset mode first");
+  return false;
+}
+
 void processUARTCommand(char *line) {
   if (line[0] == '\0') {
     return;
@@ -834,6 +994,12 @@ void processUARTCommand(char *line) {
     return;
   }
 
+  if (strcmp(line, "RESET_ARM") == 0) {
+    armResetModeEntry();
+    Serial.println("OK RESET_ARM");
+    return;
+  }
+
   if (strncmp(line, "CHALLENGE ", 10) == 0) {
     uint8_t challenge[CHALLENGE_LENGTH];
     uint8_t response[SHA1_DIGEST_LENGTH];
@@ -853,6 +1019,9 @@ void processUARTCommand(char *line) {
   }
 
   if (strcmp(line, "RESET_TIME") == 0) {
+    if (!requireResetModeForMutation()) {
+      return;
+    }
     resetElapsedTime();
     setDisplayFeedback("TIMER RESET");
     Serial.println("OK RESET_TIME");
@@ -860,13 +1029,19 @@ void processUARTCommand(char *line) {
   }
 
   if (strcmp(line, "UNREGISTER") == 0) {
-    writeProvisionedMarker(false);
+    if (!requireResetModeForMutation()) {
+      return;
+    }
+    clearActiveProfile();
     setDisplayFeedback("UNREGISTERED");
     Serial.println("OK UNREGISTER");
     return;
   }
 
   if (strncmp(line, "PROVISION ", 10) == 0) {
+    if (!requireResetModeForMutation()) {
+      return;
+    }
     uint8_t newKey[KEY_LENGTH];
     uint32_t newTimestep = DEFAULT_TOTP_TIMESTEP_SECONDS;
     if (!parseProvisionArgs(line + 10, newKey, &newTimestep)) {
@@ -881,6 +1056,9 @@ void processUARTCommand(char *line) {
   }
 
   if (strncmp(line, "RESET_ALL ", 10) == 0) {
+    if (!requireResetModeForMutation()) {
+      return;
+    }
     uint8_t newKey[KEY_LENGTH];
     uint32_t newTimestep = DEFAULT_TOTP_TIMESTEP_SECONDS;
     if (!parseProvisionArgs(line + 10, newKey, &newTimestep)) {
@@ -966,6 +1144,7 @@ void runResetMode() {
   beginSerial();
   beginDisplay();
   setDisplayFeedback("RESET MODE");
+  resetModeActive = true;
   buttonPressed = false;
 
   bool readyForExitPress = !buttonIsDown();
@@ -980,18 +1159,18 @@ void runResetMode() {
       extendUARTAdminWindow();
     }
 
+    const bool pressEvent = consumeButtonPress();
     const bool buttonDown = buttonIsDown();
     if (!readyForExitPress) {
       if (!buttonDown) {
         readyForExitPress = true;
       }
       buttonPressed = false;
-    } else if (!trackingExitPress && (buttonPressed || buttonDown)) {
-      buttonPressed = false;
-      if (buttonDown) {
-        trackingExitPress = true;
-        exitPressStartedMs = millis();
-      }
+    } else if (!trackingExitPress &&
+               ((pressEvent && buttonDown) ||
+                (!pressEvent && buttonDown && acceptButtonDownAsPressStart()))) {
+      trackingExitPress = true;
+      exitPressStartedMs = millis();
     } else if (trackingExitPress) {
       if (!buttonDown) {
         trackingExitPress = false;
@@ -1011,6 +1190,7 @@ void runResetMode() {
 
   clearDisplay();
   shutdownDisplay();
+  resetModeActive = false;
   buttonPressed = false;
   displayFeedback[0] = '\0';
 }
@@ -1024,50 +1204,63 @@ void loop() {
 
   if (consumeButtonPress()) {
     beginDisplay();
-    pollRTCState();
-    const uint32_t currentSeconds = getRTCSeconds();
-    const uint32_t code = generateTOTP(currentSeconds);
-
-    displayCode(code, currentSeconds);
+    displayActiveProfile();
     buttonPressed = false;
-    const uint32_t displayUntil = getRTCSeconds() + DISPLAY_WINDOW_SECONDS;
+    uint32_t displayUntil = getRTCRawSeconds() + DISPLAY_WINDOW_SECONDS;
     bool readyForDisplayPress = !buttonIsDown();
     bool trackingDisplayPress = false;
     uint32_t displayPressStartedMs = 0;
     uint32_t nextRefreshMs = millis() + RESET_MODE_REFRESH_MS;
 
-    while (static_cast<int32_t>(displayUntil - getRTCSeconds()) > 0) {
+    while (static_cast<int32_t>(displayUntil - getRTCRawSeconds()) > 0) {
       pollRTCState();
       if (handleUARTCommands()) {
         extendUARTAdminWindow();
       }
 
+      const bool pressEvent = consumeButtonPress();
       const bool buttonDown = buttonIsDown();
       if (!readyForDisplayPress) {
         if (!buttonDown) {
           readyForDisplayPress = true;
         }
         buttonPressed = false;
-      } else if (!trackingDisplayPress && (buttonPressed || buttonDown)) {
-        buttonPressed = false;
-        if (buttonDown) {
+      } else if (!trackingDisplayPress) {
+        if (pressEvent && !buttonDown) {
+          cycleToNextProfile();
+          displayActiveProfile();
+          displayUntil = getRTCRawSeconds() + DISPLAY_WINDOW_SECONDS;
+          nextRefreshMs = millis() + RESET_MODE_REFRESH_MS;
+          continue;
+        }
+        if ((pressEvent && buttonDown) ||
+            (!pressEvent && buttonDown && acceptButtonDownAsPressStart())) {
           trackingDisplayPress = true;
           displayPressStartedMs = millis();
         }
       } else if (trackingDisplayPress) {
         if (!buttonDown) {
-          break;
+          trackingDisplayPress = false;
+          cycleToNextProfile();
+          displayActiveProfile();
+          displayUntil = getRTCRawSeconds() + DISPLAY_WINDOW_SECONDS;
+          nextRefreshMs = millis() + RESET_MODE_REFRESH_MS;
+          continue;
         }
         if ((millis() - displayPressStartedMs) >= RESET_MODE_LONG_PRESS_MS) {
-          runResetMode();
-          return;
+          if (resetModeEntryArmed()) {
+            runResetMode();
+            return;
+          }
+          trackingDisplayPress = false;
+          readyForDisplayPress = false;
+          buttonPressed = false;
         }
       }
 
       const uint32_t now = millis();
       if (static_cast<int32_t>(now - nextRefreshMs) >= 0) {
-        const uint32_t refreshedSeconds = getRTCSeconds();
-        displayCode(generateTOTP(refreshedSeconds), refreshedSeconds);
+        displayActiveProfile();
         nextRefreshMs = now + RESET_MODE_REFRESH_MS;
       }
 

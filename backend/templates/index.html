@@ -4,48 +4,42 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Token Manager</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <title>Pendant Manager</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=20260522-patient-info">
     <script src="https://unpkg.com/feather-icons"></script>
 </head>
 
 <body>
-    <div class="background-blobs">
-        <div class="blob blob-1"></div>
-        <div class="blob blob-2"></div>
-    </div>
-
     <div class="app-container">
-        <!-- Sidebar -->
         <aside class="sidebar glass-panel">
+            <div class="interface-toggle" aria-label="Interface mode">
+                <button id="developer-mode-btn" class="toggle-option active" type="button">Developer</button>
+                <button id="user-mode-btn" class="toggle-option" type="button">User</button>
+            </div>
             <div class="sidebar-header">
-                <h2>Tokens</h2>
-                <button id="add-device-btn" class="icon-btn" title="Add Device">
+                <h2>Pendants</h2>
+                <button id="add-device-btn" class="icon-btn" title="Add Pendant">
                     <i data-feather="plus"></i>
                 </button>
             </div>
-            <ul id="device-list" class="device-list">
-                <!-- Devices will be injected here -->
-            </ul>
+            <ul id="device-list" class="device-list"></ul>
         </aside>
 
-        <!-- Main Content -->
         <main class="main-content glass-panel" id="main-view">
             <div class="empty-state" id="empty-state">
                 <i data-feather="cpu" class="empty-icon"></i>
-                <h3>Select a Token Device</h3>
-                <p>Register or select a device to view its authenticator code.</p>
+                <h3>Select a Pendant</h3>
+                <p>Register or select a pendant to view its authenticator code.</p>
             </div>
 
             <div class="totp-view hidden" id="totp-view">
                 <div class="totp-header">
                     <h2 id="active-device-name">Device Name</h2>
-                    <div class="header-actions" style="display: flex; gap: 8px;">
-                        <button id="toggle-admin-btn" class="icon-btn" title="Admin View">
-                            <i data-feather="terminal"></i>
+                    <div class="header-actions">
+                        <button id="edit-device-btn" class="icon-btn" title="Rename Pendant">
+                            <i data-feather="edit-3"></i>
                         </button>
-                        <button id="delete-device-btn" class="icon-btn danger" title="Delete Device">
+                        <button id="delete-device-btn" class="icon-btn danger" title="Delete Pendant">
                             <i data-feather="trash-2"></i>
                         </button>
                     </div>
@@ -55,50 +49,99 @@
                     <div class="circular-progress-wrapper">
                         <svg class="circular-progress" viewBox="0 0 100 100">
                             <circle class="circular-progress-bg" cx="50" cy="50" r="45"></circle>
-                            <circle class="circular-progress-value" id="progress-circle" cx="50" cy="50" r="45">
-                            </circle>
+                            <circle class="circular-progress-value" id="progress-circle" cx="50" cy="50" r="45"></circle>
                         </svg>
                         <div class="totp-code" id="totp-code">------</div>
                     </div>
                 </div>
 
-                <p class="sync-info">Powered by shared RTC clock synchronization.</p>
-
-                <div class="admin-panel hidden" id="admin-panel">
-                    <div class="admin-header">
-                        <h4>Admin Controls</h4>
-                        <button id="verify-btn" class="secondary-btn small-btn" title="Verify Hardware Match">
-                            <i data-feather="cpu"></i> Verify Hardware
-                        </button>
+                <div class="status-panel" id="status-panel">
+                    <div class="status-details">
+                        <p class="secret-row"><strong>Key:</strong> <span id="status-key" class="revealable-text" title="Click to reveal">****************************************</span></p>
+                        <p><strong>Elapsed:</strong> <span id="status-elapsed">0.0</span>s</p>
+                        <p><strong>Step:</strong> <span id="status-timestep">30</span>s</p>
                     </div>
-                    <div class="admin-details">
-                        <p><strong>Key:</strong> <span id="admin-secret" class="revealable-text"
-                                title="Click to reveal">********************</span></p>
-                        <p><strong>Elapsed:</strong> <span id="admin-elapsed">0</span>s</p>
-                    </div>
-                    <div class="admin-actions">
-                        <button id="resync-timer-btn" class="secondary-btn">Resync Timer</button>
-                        <button id="reset-key-btn" class="secondary-btn danger-border">Reset Key & Time</button>
-                    </div>
+                    <button id="patient-info-btn" class="secondary-btn patient-info-btn" type="button">
+                        <i data-feather="clipboard"></i>
+                        Patient Information
+                    </button>
                 </div>
             </div>
         </main>
+
+        <aside class="hardware-panel glass-panel">
+            <div class="hardware-header">
+                <h2>Hardware</h2>
+                <button id="refresh-hardware-btn" class="icon-btn" title="Refresh Ports">
+                    <i data-feather="refresh-cw"></i>
+                </button>
+            </div>
+
+            <div class="hardware-section adapter-section developer-only">
+                <label for="adapter-port">Adapter Port</label>
+                <select id="adapter-port"></select>
+                <div class="mode-status" id="mode-status">Mode not selected</div>
+                <div class="button-row">
+                    <button id="mode-updi-btn" class="secondary-btn developer-only">UPDI</button>
+                    <button id="mode-uart-btn" class="secondary-btn">UART</button>
+                </div>
+            </div>
+
+            <div class="hardware-section developer-only">
+                <label for="upload-port">UPDI Upload Port</label>
+                <select id="upload-port"></select>
+                <label for="firmware-target">Firmware</label>
+                <select id="firmware-target"></select>
+                <button id="flash-firmware-btn" class="primary-btn compact-btn">
+                    <i data-feather="zap"></i>
+                    Flash Selected Firmware
+                </button>
+                <div class="flash-status" id="flash-status">Idle</div>
+            </div>
+
+            <div class="hardware-section">
+                <label for="token-port" id="token-port-label">Pendant UART Port</label>
+                <select id="token-port"></select>
+                <div class="timestep-control developer-only">
+                    <label for="timestep-select">Pendant Step</label>
+                    <select id="timestep-select">
+                        <option value="30" selected>30 seconds</option>
+                        <option value="150">2.5 minutes</option>
+                    </select>
+                </div>
+                <div class="button-row uart-debug-row">
+                    <button id="token-hello-btn" class="secondary-btn">Test UART</button>
+                    <button id="token-read-serial-btn" class="secondary-btn">Read RTC</button>
+                </div>
+                <div class="button-row developer-only pendant-control-row single-button-row">
+                    <button id="reset-key-btn" class="secondary-btn danger-border">Reset to Default Key</button>
+                </div>
+                <button id="provision-key-btn" class="secondary-btn danger-border">Reset Pendant</button>
+                <div class="flash-status pendant-reset-status" id="pendant-reset-status">Idle</div>
+            </div>
+
+            <div class="hardware-log-wrap">
+                <div class="log-header">
+                    <span>Activity Log</span>
+                    <button id="clear-log-btn" class="link-btn">Clear</button>
+                </div>
+                <pre id="hardware-log" class="hardware-log"></pre>
+            </div>
+        </aside>
     </div>
 
-    <!-- Registration Modal -->
     <div class="modal hidden" id="register-modal">
         <div class="modal-content glass-panel">
             <div class="modal-header">
-                <h3>Register New Device</h3>
+                <h3>Register New Pendant</h3>
                 <button class="icon-btn close-modal"><i data-feather="x"></i></button>
             </div>
             <div class="modal-body">
-                <p class="modal-desc">Connect the ATtiny3216 to the Raspberry Pi over UART for provisioning.</p>
+                <p class="modal-desc">Select the pendant serial port, then provision the connected ATtiny3216.</p>
                 <form id="register-form">
                     <div class="input-group">
                         <label for="device-name">Device Name</label>
-                        <input type="text" id="device-name" placeholder="e.g. Work Email, Personal Key" required
-                            autocomplete="off">
+                        <input type="text" id="device-name" placeholder="e.g. Work Email, Personal Key" required autocomplete="off">
                     </div>
                     <button type="submit" class="primary-btn" id="register-submit-btn">
                         <span class="btn-text">Provision Device</span>
@@ -108,7 +151,87 @@
         </div>
     </div>
 
-    <script src="{{ url_for('static', filename='app.js') }}"></script>
+    <div class="modal hidden" id="patient-modal">
+        <div class="modal-content glass-panel patient-modal-content">
+            <div class="modal-header split-header">
+                <h3>Patient Information</h3>
+                <button class="icon-btn" id="close-patient-modal-btn" type="button" title="Close">
+                    <i data-feather="x"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div id="patient-read-view" class="patient-read-view">
+                    <dl class="patient-summary">
+                        <div>
+                            <dt>Name</dt>
+                            <dd id="patient-view-name">Not set</dd>
+                        </div>
+                        <div>
+                            <dt>Age</dt>
+                            <dd id="patient-view-age">Not set</dd>
+                        </div>
+                        <div>
+                            <dt>Phone</dt>
+                            <dd id="patient-view-phone">Not set</dd>
+                        </div>
+                        <div>
+                            <dt>Emergency Contact</dt>
+                            <dd id="patient-view-emergency">Not set</dd>
+                        </div>
+                        <div>
+                            <dt>Allergies / Alerts</dt>
+                            <dd id="patient-view-allergies">Not set</dd>
+                        </div>
+                        <div class="wide-row">
+                            <dt>Medical Notes</dt>
+                            <dd id="patient-view-notes">Not set</dd>
+                        </div>
+                    </dl>
+                    <div class="dialog-actions">
+                        <button id="patient-edit-btn" class="secondary-btn" type="button">
+                            <i data-feather="edit-3"></i>
+                            Edit
+                        </button>
+                    </div>
+                </div>
+
+                <form id="patient-form" class="patient-form hidden">
+                    <div class="patient-form-grid">
+                        <div class="input-group">
+                            <label for="patient-name">Name</label>
+                            <input type="text" id="patient-name" maxlength="120" autocomplete="off">
+                        </div>
+                        <div class="input-group">
+                            <label for="patient-age">Age</label>
+                            <input type="number" id="patient-age" min="0" max="130" inputmode="numeric">
+                        </div>
+                        <div class="input-group">
+                            <label for="patient-phone">Phone</label>
+                            <input type="tel" id="patient-phone" maxlength="60" autocomplete="off">
+                        </div>
+                        <div class="input-group">
+                            <label for="patient-emergency-contact">Emergency Contact</label>
+                            <input type="text" id="patient-emergency-contact" maxlength="160" autocomplete="off">
+                        </div>
+                        <div class="input-group wide-row">
+                            <label for="patient-allergies">Allergies / Alerts</label>
+                            <textarea id="patient-allergies" maxlength="500" rows="3"></textarea>
+                        </div>
+                        <div class="input-group wide-row">
+                            <label for="patient-notes">Medical Notes / Log</label>
+                            <textarea id="patient-notes" maxlength="4000" rows="7"></textarea>
+                        </div>
+                    </div>
+                    <div class="dialog-actions">
+                        <button id="patient-cancel-btn" class="secondary-btn" type="button">Cancel</button>
+                        <button id="patient-save-btn" class="primary-btn" type="submit">Save</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='app.js') }}?v=20260522-patient-info"></script>
     <script>
         feather.replace();
     </script>
