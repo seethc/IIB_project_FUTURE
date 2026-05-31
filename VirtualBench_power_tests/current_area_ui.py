@@ -63,10 +63,6 @@ def get_csv_display_label(csv_path: Path, index: int | None = None) -> str:
     return f"{index_prefix}{csv_path.name}"
 
 
-def clamp(value: float, lower: float, upper: float) -> float:
-    return max(lower, min(upper, value))
-
-
 def format_floor_value(value: float) -> str:
     return f"{value:.10f}"
 
@@ -743,9 +739,25 @@ class CurrentAreaApp:
         else:
             floor = data_min
 
-        self.set_floor_value(clamp(floor, self.floor_min, self.floor_max))
+        self.set_floor_value(floor)
+
+    def ensure_floor_slider_contains(self, floor: float) -> None:
+        if self.floor_min <= floor <= self.floor_max:
+            return
+
+        current_span = max(self.floor_max - self.floor_min, 1e-9)
+        target_margin = max(current_span * 0.15, abs(floor) * 0.15, 1e-9)
+        self.floor_min = min(self.floor_min, floor - target_margin)
+        self.floor_max = max(self.floor_max, floor + target_margin)
+        self.floor_scale.configure(
+            from_=self.floor_min,
+            to=self.floor_max,
+            resolution=-1,
+            digits=16,
+        )
 
     def set_floor_value(self, floor: float) -> None:
+        self.ensure_floor_slider_contains(floor)
         self.current_floor = floor
         self.is_syncing_floor = True
         self.floor_scale.set(floor)
@@ -780,7 +792,6 @@ class CurrentAreaApp:
             self.root.bell()
             return
 
-        floor = clamp(floor, self.floor_min, self.floor_max)
         self.set_floor_value(floor)
         self.set_status("")
         self.update_plot(preserve_limits=True)
@@ -916,7 +927,7 @@ class CurrentAreaApp:
             return
 
         average_floor = sum(window_currents) / len(window_currents)
-        self.set_floor_value(clamp(average_floor, self.floor_min, self.floor_max))
+        self.set_floor_value(average_floor)
         self.set_status(
             f"Floor set to the average current over {start_time:g}-{end_time:g} s."
         )

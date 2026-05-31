@@ -75,6 +75,12 @@ FIRMWARE_TARGETS = {
         "label": "main3.cpp - 3-profile token",
         "description": "Experimental three-profile token firmware with blank defaults and reset-mode-only provisioning.",
     },
+    "main3_rtc_sync_test": {
+        "source": "src/main3_rtc_sync_test.cpp",
+        "sketch": "main3_rtc_sync_test",
+        "label": "main3_rtc_sync_test.cpp - main3 clock sync test",
+        "description": "Low-power RTC count sync test based on main3 board setup; emits UART SYNC samples on button wake.",
+    },
     "rtc_sync_test": {
         "source": "src/rtc_sync_test_elapsed.cpp",
         "sketch": "rtc_sync_test_elapsed",
@@ -85,6 +91,7 @@ FIRMWARE_TARGETS = {
 FIRMWARE_TARGET_ALIASES = {
     "main2.cpp": "main2",
     "main3.cpp": "main3",
+    "main3_rtc_sync_test.cpp": "main3_rtc_sync_test",
     "rtc_sync_test_elapsed.cpp": "rtc_sync_test",
     "rtc_sync_test_serial": "rtc_sync_test",
     "rtc_sync_test_serial.cpp": "rtc_sync_test",

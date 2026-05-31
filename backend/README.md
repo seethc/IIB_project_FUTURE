@@ -36,10 +36,22 @@ Useful environment variables:
   upload command opens the port. Default is `1.5`.
 - `HARDWARE_MOCK=1`: mock serial/provisioning responses for UI testing.
 
-The web app can flash `src/main2.cpp` or `src/rtc_sync_test_elapsed.cpp`. It
+The web app can flash `src/main2.cpp`, `src/main3.cpp`,
+`src/main3_rtc_sync_test.cpp`, or `src/rtc_sync_test_elapsed.cpp`. It
 copies the selected file into a temporary Arduino sketch under `.arduino-build/`,
 then runs Arduino CLI with megaTinyCore and SerialUPDI. The backend also points
 Microchip/pymcuprog logging at a workspace-local console-only config so web
 uploads do not fail trying to write logs under AppData. Select the UPDI upload
 port before flashing, and select the token UART port before reading status,
 reading the raw RTC state, or provisioning a new key.
+
+For long RTC drift tests with the Raspberry Pi UART, flash
+`src/main3_rtc_sync_test.cpp` and run:
+
+```bash
+python backend/rtc_uart_sync_logger.py --port /dev/serial0 --output pendant_rtc_sync_log.csv
+```
+
+Each accepted Pendant button wake emits a `SYNC` line over UART. The logger
+timestamps it with Unix time and appends the RTC raw count, elapsed count,
+16-bit RTC counter, overflow seconds, and clock source to the CSV.

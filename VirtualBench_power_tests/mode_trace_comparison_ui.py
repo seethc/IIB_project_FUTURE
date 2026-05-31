@@ -490,6 +490,7 @@ class ModeTraceComparisonApp:
         self.align_window_end_var = tk.StringVar(value="60.0")
         self.show_avg_windows_var = tk.BooleanVar(value=True)
         self.show_avg_levels_var = tk.BooleanVar(value=True)
+        self.plot_title_var = tk.StringVar()
         self.chart_width_var = tk.StringVar(value="11.0")
         self.chart_height_var = tk.StringVar(value="7.0")
         self.manual_shift_target_var = tk.StringVar()
@@ -691,8 +692,29 @@ class ModeTraceComparisonApp:
             justify="left",
         ).grid(row=2, column=0, sticky="w", pady=(0, 4))
 
+        title_frame = ttk.LabelFrame(sidebar, text="Plot Title")
+        title_frame.grid(row=4, column=0, sticky="ew", pady=(10, 0))
+        title_frame.columnconfigure(0, weight=1)
+
+        self.plot_title_entry = ttk.Entry(
+            title_frame, textvariable=self.plot_title_var
+        )
+        self.plot_title_entry.grid(row=0, column=0, sticky="ew", pady=(4, 0))
+        self.plot_title_entry.bind("<Return>", lambda _event: self.update_plot())
+        self.plot_title_entry.bind("<FocusOut>", lambda _event: self.update_plot())
+
+        ttk.Label(
+            title_frame,
+            text=(
+                "Leave blank to use the automatic preset/manual title, or type a "
+                "custom title for the chart."
+            ),
+            wraplength=350,
+            justify="left",
+        ).grid(row=1, column=0, sticky="w", pady=(6, 4))
+
         chart_frame = ttk.LabelFrame(sidebar, text="Chart Size")
-        chart_frame.grid(row=4, column=0, sticky="ew", pady=(10, 0))
+        chart_frame.grid(row=5, column=0, sticky="ew", pady=(10, 0))
         chart_frame.columnconfigure(1, weight=1)
 
         ttk.Label(chart_frame, text="Width (in)").grid(row=0, column=0, sticky="w")
@@ -735,19 +757,19 @@ class ModeTraceComparisonApp:
             sidebar,
             textvariable=self.selection_count_var,
             font=("TkDefaultFont", 10, "bold"),
-        ).grid(row=5, column=0, sticky="w", pady=(10, 0))
+        ).grid(row=6, column=0, sticky="w", pady=(10, 0))
 
         ttk.Label(
             sidebar,
             textvariable=self.summary_var,
             wraplength=380,
             justify="left",
-        ).grid(row=6, column=0, sticky="ew", pady=(6, 0))
+        ).grid(row=7, column=0, sticky="ew", pady=(6, 0))
 
         customization_frame = ttk.LabelFrame(
             sidebar, text="Legend Labels And Colors"
         )
-        customization_frame.grid(row=7, column=0, sticky="ew", pady=(10, 0))
+        customization_frame.grid(row=8, column=0, sticky="ew", pady=(10, 0))
         customization_frame.columnconfigure(0, weight=1)
         self.customization_inner = ttk.Frame(customization_frame)
         self.customization_inner.grid(row=0, column=0, sticky="ew", padx=4, pady=4)
@@ -760,10 +782,10 @@ class ModeTraceComparisonApp:
             justify="left",
             foreground="#444444",
         )
-        self.status_label.grid(row=8, column=0, sticky="ew", pady=(10, 0))
+        self.status_label.grid(row=9, column=0, sticky="ew", pady=(10, 0))
 
         selection_frame = ttk.LabelFrame(sidebar, text="Manual Trace Selection")
-        selection_frame.grid(row=9, column=0, sticky="ew", pady=(10, 0))
+        selection_frame.grid(row=10, column=0, sticky="ew", pady=(10, 0))
         selection_frame.columnconfigure(0, weight=1)
 
         shift_frame = ttk.Frame(selection_frame)
@@ -1047,6 +1069,18 @@ class ModeTraceComparisonApp:
     def get_overall_average_label_text(self) -> str:
         text = self.overall_avg_label_var.get().strip()
         return text or "Average current"
+
+    def get_plot_title_text(self, preset: ModePreset | None, alignment_mode: str) -> str:
+        custom_title = self.plot_title_var.get().strip()
+        if custom_title:
+            return custom_title
+
+        title = "Selected current traces"
+        if preset is not None:
+            title = f"{preset.name} mode comparison"
+        if alignment_mode != "Raw time":
+            title += f" | {alignment_mode}"
+        return title
 
     def get_resolved_average_color(self, warning_messages: list[str]) -> str:
         raw_color = self.overall_avg_color_var.get().strip() or "#111111"
@@ -1468,51 +1502,46 @@ class ModeTraceComparisonApp:
                 linestyle="--",
                 linewidth=1.6,
                 alpha=0.95,
-                label=self.get_overall_average_label_text(),
+                label="_nolegend_",
                 zorder=max_trace_draw_order + 1000.0,
             )
             self.group_key_to_artists[overall_average_group_key] = [average_line]
             self.group_visibility.setdefault(overall_average_group_key, True)
-            legend_group_keys.append(overall_average_group_key)
 
         preset = self.preset_lookup.get(self.preset_var.get().strip())
-        title = "Selected current traces"
-        if preset is not None:
-            title = f"{preset.name} mode comparison"
-        if alignment_mode != "Raw time":
-            title += f" | {alignment_mode}"
-        self.ax.set_title(title)
+        self.ax.set_title(self.get_plot_title_text(preset, alignment_mode))
         self.ax.set_xlabel("Aligned time (s)" if alignment_mode != "Raw time" else "Time (s)")
         self.ax.set_ylabel("Current (A)")
         self.ax.grid(True, alpha=0.3)
         self.ax.ticklabel_format(axis="y", style="sci", scilimits=(0, 0))
 
-        legend = self.ax.legend(
-            loc="upper right",
-            fontsize=7,
-            frameon=True,
-            ncol=2 if len(legend_group_keys) > 12 else 1,
-            borderaxespad=0.6,
-            handlelength=1.8,
-        )
-        legend.set_draggable(True)
-        legend_handles = getattr(legend, "legend_handles", None)
-        if legend_handles is None:
-            legend_handles = getattr(legend, "legendHandles", [])
-        legend_texts = legend.get_texts()
-        for group_key, legend_handle, legend_text in zip(
-            legend_group_keys, legend_handles, legend_texts
-        ):
-            if hasattr(legend_handle, "set_picker"):
-                legend_handle.set_picker(True)
-            if hasattr(legend_handle, "set_pickradius"):
-                legend_handle.set_pickradius(8)
-            if hasattr(legend_text, "set_picker"):
-                legend_text.set_picker(True)
-            self.legend_artist_to_group[legend_handle] = group_key
-            self.legend_artist_to_group[legend_text] = group_key
-            self.group_key_to_legend_artists[group_key] = (legend_handle, legend_text)
-            self.set_group_visibility(group_key, self.group_visibility.get(group_key, True))
+        if legend_group_keys:
+            legend = self.ax.legend(
+                loc="upper right",
+                fontsize=7,
+                frameon=True,
+                ncol=2 if len(legend_group_keys) > 12 else 1,
+                borderaxespad=0.6,
+                handlelength=1.8,
+            )
+            legend.set_draggable(True)
+            legend_handles = getattr(legend, "legend_handles", None)
+            if legend_handles is None:
+                legend_handles = getattr(legend, "legendHandles", [])
+            legend_texts = legend.get_texts()
+            for group_key, legend_handle, legend_text in zip(
+                legend_group_keys, legend_handles, legend_texts
+            ):
+                if hasattr(legend_handle, "set_picker"):
+                    legend_handle.set_picker(True)
+                if hasattr(legend_handle, "set_pickradius"):
+                    legend_handle.set_pickradius(8)
+                if hasattr(legend_text, "set_picker"):
+                    legend_text.set_picker(True)
+                self.legend_artist_to_group[legend_handle] = group_key
+                self.legend_artist_to_group[legend_text] = group_key
+                self.group_key_to_legend_artists[group_key] = (legend_handle, legend_text)
+                self.set_group_visibility(group_key, self.group_visibility.get(group_key, True))
 
         if warning_messages:
             unique_messages = []

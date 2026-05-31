@@ -11,6 +11,7 @@ import serial
 DEFAULT_PORT = "/dev/serial0"
 DEFAULT_BAUD = 9600
 DEFAULT_OUTPUT = "pendant_rtc_sync_log.csv"
+DEFAULT_RECONNECT_DELAY_SECONDS = 2.0
 
 FIELD_PATTERN = re.compile(r"([A-Z_]+)=([^\s]+)")
 
@@ -67,46 +68,62 @@ def open_csv(path):
     return csv_file, writer
 
 
-def log_uart(port, baud, output):
+def log_serial_line(line, writer, csv_file):
+    unix_time = time.time()
+    utc_iso = datetime.fromtimestamp(unix_time, timezone.utc).isoformat()
+    parsed = parse_rtc_line(line)
+
+    if parsed is None:
+        print(f"[{utc_iso}] ignored: {line}")
+        return
+
+    row = {
+        "unix_time": f"{unix_time:.6f}",
+        "utc_iso": utc_iso,
+        "serial_line": line,
+        **parsed,
+    }
+    writer.writerow(row)
+    csv_file.flush()
+
+    print(
+        f"[{utc_iso}] {parsed['message_type']} "
+        f"raw={parsed['raw_seconds']} elapsed={parsed['elapsed_seconds']} "
+        f"cnt={parsed['rtc_count']} clk={parsed['clock_source']}"
+    )
+
+
+def read_serial_forever(port, baud, writer, csv_file):
+    with serial.Serial(port, baud, timeout=1) as ser:
+        print(f"Listening on {port} at {baud} baud")
+        ser.reset_input_buffer()
+
+        while True:
+            raw_line = ser.readline()
+            if not raw_line:
+                continue
+
+            line = raw_line.decode("utf-8", errors="replace").strip()
+            if line:
+                log_serial_line(line, writer, csv_file)
+
+
+def log_uart(port, baud, output, reconnect_delay):
     csv_file, writer = open_csv(output)
 
     try:
-        with serial.Serial(port, baud, timeout=1) as ser:
-            print(f"Listening on {port} at {baud} baud")
-            print(f"Logging Pendant RTC sync samples to {output}")
-            print("Press the Pendant button to wake it. Press Ctrl+C to stop.")
+        print(f"Logging Pendant RTC sync samples to {output}")
+        print("Press the Pendant button to wake it. Press Ctrl+C to stop.")
 
-            while True:
-                raw_line = ser.readline()
-                if not raw_line:
-                    continue
-
-                line = raw_line.decode("utf-8", errors="replace").strip()
-                if not line:
-                    continue
-
-                unix_time = time.time()
-                utc_iso = datetime.fromtimestamp(unix_time, timezone.utc).isoformat()
-                parsed = parse_rtc_line(line)
-
-                if parsed is None:
-                    print(f"[{utc_iso}] ignored: {line}")
-                    continue
-
-                row = {
-                    "unix_time": f"{unix_time:.6f}",
-                    "utc_iso": utc_iso,
-                    "serial_line": line,
-                    **parsed,
-                }
-                writer.writerow(row)
-                csv_file.flush()
-
+        while True:
+            try:
+                read_serial_forever(port, baud, writer, csv_file)
+            except serial.SerialException as exc:
                 print(
-                    f"[{utc_iso}] {parsed['message_type']} "
-                    f"raw={parsed['raw_seconds']} elapsed={parsed['elapsed_seconds']} "
-                    f"cnt={parsed['rtc_count']} clk={parsed['clock_source']}"
+                    f"Serial error on {port}: {exc}. "
+                    f"Retrying in {reconnect_delay:g}s..."
                 )
+                time.sleep(reconnect_delay)
     finally:
         csv_file.close()
 
@@ -122,10 +139,16 @@ def main():
         default=DEFAULT_OUTPUT,
         help="CSV file to append samples to.",
     )
+    parser.add_argument(
+        "--reconnect-delay",
+        type=float,
+        default=DEFAULT_RECONNECT_DELAY_SECONDS,
+        help="Seconds to wait before reopening the serial port after an error.",
+    )
     args = parser.parse_args()
 
     try:
-        log_uart(args.port, args.baud, args.output)
+        log_uart(args.port, args.baud, args.output, args.reconnect_delay)
     except KeyboardInterrupt:
         print("\nStopped logging.")
 
