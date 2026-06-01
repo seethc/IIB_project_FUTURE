@@ -62,10 +62,10 @@ class HardwareProtocolTest(unittest.TestCase):
 
     def test_parse_challenge_response(self):
         proof = parse_challenge_response(
-            f"OK CHALLENGE {'12' * 20} PROVISIONED=1"
+            f"OK CHALLENGE {'12' * 32} PROVISIONED=1"
         )
 
-        self.assertEqual(proof["digest"], "12" * 20)
+        self.assertEqual(proof["digest"], "12" * 32)
         self.assertTrue(proof["provisioned"])
 
     def test_mock_token_reset_all(self):

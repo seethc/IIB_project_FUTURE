@@ -3,7 +3,7 @@
 #include <U8g2lib.h>
 #include <SPI.h>
 #include <Crypto.h>
-#include <SHA1.h>
+#include <SHA256.h>
 #include <string.h>
 #include <stdlib.h>
 #include <avr/sleep.h>
@@ -26,7 +26,7 @@
 #endif
 
 #ifndef TOKEN_FIRMWARE_VERSION
-#define TOKEN_FIRMWARE_VERSION "token-main3-3profile-1.0"
+#define TOKEN_FIRMWARE_VERSION "token-main3-3profile-sha256-1.0"
 #endif
 
 #ifndef UART_ADMIN_WINDOW_SECONDS
@@ -44,7 +44,7 @@ U8G2_ST7305_200X200_1_4W_SW_SPI u8g2(
 // TOTP CONFIG
 constexpr uint8_t KEY_LENGTH = 20;
 constexpr uint8_t CHALLENGE_LENGTH = 16;
-constexpr uint8_t SHA1_DIGEST_LENGTH = 20;
+constexpr uint8_t SHA256_DIGEST_LENGTH = 32;
 constexpr uint8_t PROFILE_COUNT = 3;
 constexpr uint16_t PROFILE_EEPROM_BYTES = KEY_LENGTH + 4 + 4 + 1;
 constexpr uint16_t KEY_EEPROM_ADDR = 0;
@@ -65,7 +65,7 @@ constexpr uint16_t RESET_MODE_ARM_WINDOW_MS = 12000;
 constexpr uint16_t RESET_MODE_REFRESH_MS = 250;
 constexpr uint16_t FEEDBACK_DISPLAY_MS = 3000;
 
-SHA1 hash;
+SHA256 hash;
 uint8_t profileSecretKeys[PROFILE_COUNT][KEY_LENGTH];
 uint32_t profileTimesteps[PROFILE_COUNT];
 uint32_t profileElapsedOffsets[PROFILE_COUNT];
@@ -95,6 +95,7 @@ uint32_t resetModeArmedUntilMs = 0;
 void buttonISR();
 void prepareHMACPads();
 bool isProfileProvisioned(uint8_t profileIndex);
+bool feedbackActive();
 
 #define DISABLE_PORT_INPUTS(port)                                               \
   do {                                                                          \
@@ -597,19 +598,19 @@ uint32_t generateTOTP(uint32_t time) {
     counter >>= 8;
   }
 
-  uint8_t tempHash[20];
+  uint8_t tempHash[SHA256_DIGEST_LENGTH];
   hash.reset();
   hash.update(i_key_pad, 64);
   hash.update(counterBytes, 8);
   hash.finalize(tempHash, sizeof(tempHash));
 
-  uint8_t finalHash[20];
+  uint8_t finalHash[SHA256_DIGEST_LENGTH];
   hash.reset();
   hash.update(o_key_pad, 64);
   hash.update(tempHash, sizeof(tempHash));
   hash.finalize(finalHash, sizeof(finalHash));
 
-  const int offset = finalHash[19] & 0x0F;
+  const int offset = finalHash[SHA256_DIGEST_LENGTH - 1] & 0x0F;
   const uint32_t binary =
       ((uint32_t)(finalHash[offset] & 0x7F) << 24) |
       ((uint32_t)(finalHash[offset + 1] & 0xFF) << 16) |
@@ -894,7 +895,7 @@ void printHexByte(uint8_t value) {
 
 void computeChallengeResponse(const uint8_t *challenge, uint8_t challengeLength,
                               uint8_t *response) {
-  uint8_t tempHash[SHA1_DIGEST_LENGTH];
+  uint8_t tempHash[SHA256_DIGEST_LENGTH];
 
   hash.reset();
   hash.update(i_key_pad, 64);
@@ -904,7 +905,7 @@ void computeChallengeResponse(const uint8_t *challenge, uint8_t challengeLength,
   hash.reset();
   hash.update(o_key_pad, 64);
   hash.update(tempHash, sizeof(tempHash));
-  hash.finalize(response, SHA1_DIGEST_LENGTH);
+  hash.finalize(response, SHA256_DIGEST_LENGTH);
 }
 
 bool parseProvisionArgs(char *args, uint8_t *newKey, uint32_t *newTimestep) {
@@ -1002,7 +1003,7 @@ void processUARTCommand(char *line) {
 
   if (strncmp(line, "CHALLENGE ", 10) == 0) {
     uint8_t challenge[CHALLENGE_LENGTH];
-    uint8_t response[SHA1_DIGEST_LENGTH];
+    uint8_t response[SHA256_DIGEST_LENGTH];
     if (!parseHexBytes(line + 10, challenge, CHALLENGE_LENGTH)) {
       sendProtocolError("BAD_ARGS", "Expected CHALLENGE <32_HEX_NONCE>");
       return;
@@ -1010,7 +1011,7 @@ void processUARTCommand(char *line) {
 
     computeChallengeResponse(challenge, CHALLENGE_LENGTH, response);
     Serial.print("OK CHALLENGE ");
-    for (uint8_t i = 0; i < SHA1_DIGEST_LENGTH; ++i) {
+    for (uint8_t i = 0; i < SHA256_DIGEST_LENGTH; ++i) {
       printHexByte(response[i]);
     }
     Serial.print(" PROVISIONED=");

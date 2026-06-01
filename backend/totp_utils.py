@@ -72,7 +72,7 @@ def generate_totp(secret, elapsed_time, timestep=DEFAULT_TIMESTEP_SECONDS):
 
     counter = int(elapsed_time) // timestep
     counter_bytes = struct.pack(">Q", counter)
-    hmac_hash = hmac.new(secret, counter_bytes, hashlib.sha1).digest()
+    hmac_hash = hmac.new(secret, counter_bytes, hashlib.sha256).digest()
 
     offset = hmac_hash[-1] & 0x0F
     binary = (
@@ -107,5 +107,5 @@ def generate_challenge_response(secret_hex, challenge_hex):
     return hmac.new(
         secret_hex_to_bytes(secret_hex),
         bytes.fromhex(challenge_hex),
-        hashlib.sha1,
+        hashlib.sha256,
     ).hexdigest()

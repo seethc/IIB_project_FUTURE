@@ -405,7 +405,7 @@ def parse_rtc_response(line):
 
 def parse_challenge_response(line):
     match = re.fullmatch(
-        r"OK CHALLENGE (?P<digest>[0-9a-fA-F]{40}) "
+        r"OK CHALLENGE (?P<digest>[0-9a-fA-F]{64}) "
         r"PROVISIONED=(?P<provisioned>[01])",
         line.strip(),
     )
@@ -436,7 +436,7 @@ def _mock_token_response(command_line):
         digest = hmac.new(
             bytes.fromhex(_MOCK_TOKEN_SECRET_HEX),
             bytes.fromhex(challenge_hex),
-            hashlib.sha1,
+            hashlib.sha256,
         ).hexdigest()
         return (
             f"OK CHALLENGE {digest} "
