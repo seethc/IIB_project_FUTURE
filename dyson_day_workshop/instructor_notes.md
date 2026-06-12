@@ -30,6 +30,33 @@ https://github.com/olikraus/u8g2/wiki/u8g2setupcpp
 https://github.com/rweather/arduinolibs
 ```
 
+## Install Workshop Project Files
+
+Copy the full `dyson_day_workshop` folder onto each school computer before the session.
+
+Recommended location:
+
+```text
+%USERPROFILE%\Documents\Arduino\dyson_day_workshop
+```
+
+The folder must keep this structure:
+
+```text
+dyson_day_workshop/
+  01_display_name/
+    01_display_name.ino
+  02_seconds_counter/
+    02_seconds_counter.ino
+  03_otp_final/
+    03_otp_final.ino
+    otp_helper.h
+  instructor_notes.md
+  workshop_notebook.md
+```
+
+Arduino IDE expects each `.ino` file to stay inside a folder with the same name as the sketch.
+
 ## Install megaTinyCore
 
 1. Open Arduino IDE 2.3.4.
@@ -148,32 +175,6 @@ dyson_day_workshop/03_otp_final/03_otp_final.ino
 jtag2updi
 ```
 
-If no COM port appears:
-
-- Try a different USB cable.
-- Try a different USB port.
-- Check Windows Device Manager.
-- Install the matching USB serial driver for the programmer chip. Common options are CH340, CP210x, and FTDI.
-
-## Workshop File Structure
-
-Keep the folder structure unchanged:
-
-```text
-dyson_day_workshop/
-  01_display_name/
-    01_display_name.ino
-  02_seconds_counter/
-    02_seconds_counter.ino
-  03_otp_final/
-    03_otp_final.ino
-    otp_helper.h
-  instructor_notes.md
-  workshop_notebook.md
-```
-
-Arduino IDE expects each `.ino` file to stay inside a folder with the same name as the sketch.
-
 ## Preflight Validation
 
 Complete this checklist before students arrive:
@@ -206,16 +207,6 @@ const char STUDENT_NAME[] = "TEST";
 
 4. Run `Sketch > Upload Using Programmer`.
 5. Confirm the OLED displays `TEST`.
-
-## If School Installs Are Blocked
-
-Fallback options:
-
-- Ask school IT to allow Arduino board and library downloads before the workshop.
-- Ask school IT to preinstall megaTinyCore, U8g2, and Crypto under the same Windows account students will use.
-- Bring one or two configured laptops as upload stations.
-- Pre-flash spare ATtiny1616 chips with `01_display_name` or `03_otp_final`.
-- Keep one fully working demo circuit available even if student machines cannot upload.
 
 ## Before Students Arrive
 
@@ -286,7 +277,6 @@ Compile failure:
 - Missing `U8g2lib.h`: install U8g2.
 - Missing `Crypto.h` or `SHA1.h`: install Crypto by Rhys Weatherley / Arduino CryptoLibs.
 - Unknown `PIN_PA4`: select megaTinyCore and ATtiny1616.
-- megaTinyCore missing from Boards Manager: check the drazzy URL, restart Arduino IDE, search for `Konde`, then check whether the school network blocks the package index.
 
 ## Deliberate Fault Check
 
