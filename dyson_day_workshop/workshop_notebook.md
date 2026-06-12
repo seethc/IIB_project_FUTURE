@@ -74,7 +74,11 @@ Change it to your name. Keep the quotation marks.
 
 Upload using the programmer. Your display should show your name and `ATtiny1616`.
 
-If the screen is upside down, change `U8G2_R0` to `U8G2_R2` in the line that starts with `U8G2_SSD1306`.
+If the screen is upside down, add this line after `display.begin();`:
+
+```cpp
+display.setFlipMode(1);
+```
 
 ## Step 2: Make the Chip Count Seconds
 
@@ -154,11 +158,11 @@ Upload error:
 
 Weird or mirrored display:
 
-- Try changing `U8G2_R0` to `U8G2_R2`.
+- Try adding `display.setFlipMode(1);` after `display.begin();`.
 
 ## Challenge Ideas
 
 - Change the name text.
 - Change the OTP refresh period from 10 seconds to 30 seconds in `otp_helper.h`.
-- Draw a box around the code.
-- Add a progress bar for the countdown.
+- Change the screen labels.
+- Show a row of `*` characters as a countdown bar.

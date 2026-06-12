@@ -2,7 +2,6 @@
 #define OTP_HELPER_H
 
 #include <Arduino.h>
-#include <Crypto.h>
 #include <SHA1.h>
 #include <string.h>
 
@@ -69,7 +68,12 @@ uint32_t generateOtpCode(uint32_t secondsSinceBoot) {
 }
 
 void formatOtp(uint32_t code, char output[7]) {
-  snprintf(output, 7, "%06lu", (unsigned long)(code % 1000000UL));
+  code %= 1000000UL;
+  for (int8_t index = 5; index >= 0; --index) {
+    output[index] = '0' + (code % 10);
+    code /= 10;
+  }
+  output[6] = '\0';
 }
 
 #endif

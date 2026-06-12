@@ -1,4 +1,4 @@
-# Dyson Day ATtiny1616 Workshop: Instructor Setup and Delivery Guide
+# Dyson Day OTP Workshop: Instructor Setup and Delivery Guide
 
 ## Required Software
 
@@ -6,18 +6,21 @@ Arduino IDE 2.3.4 must already be installed on each school computer.
 
 Additional required components:
 
-- megaTinyCore board package for ATtiny1616 support.
+- megaTinyCore board package for ATtiny1616 workshops.
+- Arduino ESP32 Boards package for Arduino Nano ESP32 workshops.
 - U8g2 display library for the SPI SSD1306 OLED.
 - Crypto library by Rhys Weatherley / Arduino CryptoLibs for SHA1 support in the OTP demo.
-- USB serial driver for the jtag2updi programmer, if Windows does not detect the programmer automatically.
+- USB serial driver for the jtag2updi programmer when using ATtiny1616 hardware.
 
-## Required Boards Manager URL
+## ATtiny1616 Boards Manager URL
 
-Only this Boards Manager URL is required for the workshop:
+This Boards Manager URL is required only for the ATtiny1616 version:
 
 ```text
 https://drazzy.com/package_drazzy.com_index.json
 ```
+
+The Arduino Nano ESP32 version does not need this URL.
 
 ## Reference URLs
 
@@ -28,6 +31,8 @@ https://github.com/SpenceKonde/megaTinyCore/blob/master/megaavr/extras/ATtiny_x1
 https://github.com/olikraus/u8g2
 https://github.com/olikraus/u8g2/wiki/u8g2setupcpp
 https://github.com/rweather/arduinolibs
+https://docs.arduino.cc/hardware/nano-esp32/
+https://docs.arduino.cc/resources/pinouts/ABX00083-full-pinout.pdf
 ```
 
 ## Install Workshop Project Files
@@ -53,11 +58,14 @@ dyson_day_workshop/
     otp_helper.h
   instructor_notes.md
   workshop_notebook.md
+  workshop_notebook_nano_esp32.md
 ```
 
 Arduino IDE expects each `.ino` file to stay inside a folder with the same name as the sketch.
 
 ## Install megaTinyCore
+
+Use this section only for the ATtiny1616 version.
 
 1. Open Arduino IDE 2.3.4.
 2. Open `File > Preferences`.
@@ -80,6 +88,21 @@ megaTinyCore
 9. Install `megaTinyCore by Spence Konde`.
 10. Wait for installation to finish.
 
+## Install Arduino Nano ESP32 Board Package
+
+Use this section only for the Arduino Nano ESP32 version.
+
+1. Open Arduino IDE 2.3.4.
+2. Open `Tools > Board > Boards Manager`.
+3. Search for:
+
+```text
+Arduino ESP32 Boards
+```
+
+4. Install `Arduino ESP32 Boards` by Arduino.
+5. Wait for installation to finish.
+
 ## Select ATtiny1616 Settings
 
 The exact menu wording varies slightly between megaTinyCore versions.
@@ -89,7 +112,7 @@ Set the Arduino IDE `Tools` menu as follows:
 - Board family: megaTinyCore / tinyAVR 0/1/2-series.
 - Chip or board: `ATtiny1616`.
 - Clock: `16 MHz internal` or `20 MHz internal`.
-- Programmer: `SerialUPDI - SLOW: 57600 baud`.
+- Programmer: `jtag2updi`.
 - Port: COM port assigned to the programmer.
 
 Upload method:
@@ -99,6 +122,36 @@ Sketch > Upload Using Programmer
 ```
 
 Do not use the standard upload button unless the machine has been configured so that the button performs programmer uploads.
+
+## Select Arduino Nano ESP32 Settings
+
+Set the Arduino IDE `Tools` menu as follows:
+
+- Board package: `Arduino ESP32 Boards`.
+- Board: `Arduino Nano ESP32`.
+- Port: USB port assigned to the Nano ESP32.
+
+Upload method:
+
+```text
+Sketch > Upload
+```
+
+The Nano ESP32 programs directly over USB-C. No UPDI programmer is used.
+
+## Arduino Nano ESP32 OLED Wiring
+
+| OLED pin | Arduino Nano ESP32 pin |
+| --- | --- |
+| `VCC` | `3V3` |
+| `GND` | `GND` |
+| `SCK` or `CLK` | `D13` |
+| `MOSI`, `SDA`, or `DIN` | `D11` |
+| `CS` | `D10` |
+| `DC` | `D9` |
+| `RST` or `RES` | `D8` |
+
+The Nano ESP32 uploads over USB-C. Do not connect a UPDI programmer.
 
 ## Install U8g2
 
@@ -124,7 +177,7 @@ dyson_day_workshop/01_display_name/01_display_name.ino
 ```
 
 2. Run `Sketch > Verify/Compile`.
-3. `U8g2lib.h: No such file or directory` means U8g2 is missing for the active Windows/Arduino user account.
+3. `U8x8lib.h: No such file or directory` means U8g2 is missing for the active Windows/Arduino user account.
 
 ## Install Crypto
 
@@ -141,14 +194,11 @@ Crypto
 Crypto
 ```
 
-or:
-
-Copy and paste folder from Seth's USB drive.
+or copy the `Crypto` library folder from the workshop USB drive into the Arduino libraries folder.
 
 The installed library must provide:
 
 ```text
-Crypto.h
 SHA1.h
 ```
 
@@ -161,9 +211,11 @@ dyson_day_workshop/03_otp_final/03_otp_final.ino
 ```
 
 2. Run `Sketch > Verify/Compile`.
-3. `Crypto.h: No such file or directory` or `SHA1.h: No such file or directory` means the Crypto library is missing or the wrong library is installed.
+3. `SHA1.h: No such file or directory` means the Crypto library is missing or the wrong library is installed.
 
 ## Programmer Setup
+
+Use this section only for the ATtiny1616 version.
 
 1. Connect the jtag2updi programmer by USB.
 2. Open `Tools > Port`.
@@ -180,15 +232,24 @@ jtag2updi
 Complete this checklist before students arrive:
 
 - Arduino IDE 2.3.4 opens.
-- megaTinyCore is installed.
-- `ATtiny1616` is selected.
 - U8g2 is installed.
-- Crypto library with `Crypto.h` and `SHA1.h` is installed.
-- Programmer is set to `jtag2updi`.
+- Crypto library with `SHA1.h` is installed.
 - Correct COM port is selected.
 - All three sketches compile.
-- `01_display_name` uploads with `Sketch > Upload Using Programmer`.
 - The OLED shows the test name.
+
+ATtiny1616-specific checks:
+
+- megaTinyCore is installed.
+- `ATtiny1616` is selected.
+- Programmer is set to `jtag2updi`.
+- `01_display_name` uploads with `Sketch > Upload Using Programmer`.
+
+Arduino Nano ESP32-specific checks:
+
+- `Arduino ESP32 Boards` is installed.
+- `Arduino Nano ESP32` is selected.
+- `01_display_name` uploads with `Sketch > Upload`.
 
 Recommended hardware validation:
 
@@ -205,7 +266,7 @@ dyson_day_workshop/01_display_name/01_display_name.ino
 const char STUDENT_NAME[] = "TEST";
 ```
 
-4. Run `Sketch > Upload Using Programmer`.
+4. Run `Sketch > Upload Using Programmer` for ATtiny1616, or `Sketch > Upload` for Arduino Nano ESP32.
 5. Confirm the OLED displays `TEST`.
 
 ## Before Students Arrive
@@ -213,8 +274,9 @@ const char STUDENT_NAME[] = "TEST";
 - Compile all three sketches on one computer configured like the student computers.
 - Upload `01_display_name` to one complete hardware kit.
 - Confirm that the OLED module works at the selected voltage.
-- Print or project the exact pinout for the bare ATtiny1616 adapter used in the room.
-- Label each programmer with its expected COM port if possible.
+- Print or project the correct pinout for the selected board.
+- Label each ATtiny1616 programmer with its expected COM port if possible.
+- For Arduino Nano ESP32 kits, confirm each USB-C cable supports data.
 - Keep one known-good wired kit available for comparison during troubleshooting.
 
 ## 30 Minute Flow
@@ -222,7 +284,7 @@ const char STUDENT_NAME[] = "TEST";
 | Time | Activity |
 | --- | --- |
 | 0:00-0:03 | Show the finished OTP display and explain the goal. |
-| 0:03-0:08 | Walk through ATtiny power, ground, UPDI, and OLED wiring. |
+| 0:03-0:08 | Walk through power, ground, upload wiring, and OLED wiring for the selected board. |
 | 0:08-0:13 | Students upload `01_display_name` and customize their name. |
 | 0:13-0:18 | Students upload `02_seconds_counter`; explain `setup()`, `loop()`, and `millis()`. |
 | 0:18-0:25 | Students upload `03_otp_final`; explain time window plus shared secret at a high level. |
@@ -261,7 +323,7 @@ Blank screen:
 - Check common ground first.
 - Check OLED power and voltage.
 - Confirm `SCK` and `MOSI` are not swapped.
-- Confirm `CS`, `DC`, and `RST` are connected to `PA3`, `PA6`, and `PA7`.
+- Confirm `CS`, `DC`, and `RST` are connected to the pins listed in the selected student notebook.
 - Confirm the display is SSD1306 128x64 SPI. SH1106 or I2C modules need different code.
 
 Upload failure:
@@ -274,9 +336,9 @@ Upload failure:
 
 Compile failure:
 
-- Missing `U8g2lib.h`: install U8g2.
-- Missing `Crypto.h` or `SHA1.h`: install Crypto by Rhys Weatherley / Arduino CryptoLibs.
-- Unknown `PIN_PA4`: select megaTinyCore and ATtiny1616.
+- Missing `U8x8lib.h`: install U8g2.
+- Missing `SHA1.h`: install Crypto by Rhys Weatherley / Arduino CryptoLibs.
+- Wrong board selected: select `ATtiny1616` for the ATtiny version or `Arduino Nano ESP32` for the Nano version.
 
 ## Deliberate Fault Check
 
