@@ -1,20 +1,7 @@
 #include <Arduino.h>
 #include <U8x8lib.h>
+#include <Wire.h>
 #include <string.h>
-
-#if defined(MEGATINYCORE)
-const uint8_t OLED_CLK = PIN_PA4;
-const uint8_t OLED_MOSI = PIN_PA5;
-const uint8_t OLED_CS = PIN_PA3;
-const uint8_t OLED_DC = PIN_PA6;
-const uint8_t OLED_RST = PIN_PA7;
-#else
-const uint8_t OLED_CLK = D13;
-const uint8_t OLED_MOSI = D11;
-const uint8_t OLED_CS = D10;
-const uint8_t OLED_DC = D9;
-const uint8_t OLED_RST = D8;
-#endif
 
 const char STUDENT_NAME[] = "YOUR NAME";
 
@@ -24,8 +11,7 @@ const char BOARD_NAME[] = "ATtiny1616";
 const char BOARD_NAME[] = "Nano ESP32";
 #endif
 
-U8X8_SSD1306_128X64_NONAME_4W_SW_SPI display(
-    OLED_CLK, OLED_MOSI, OLED_CS, OLED_DC, OLED_RST);
+U8X8_SSD1306_128X64_NONAME_HW_I2C display(U8X8_PIN_NONE);
 
 uint8_t centeredColumn(const char *text) {
   size_t length = strlen(text);

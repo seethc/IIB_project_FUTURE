@@ -1,11 +1,11 @@
 # Build a Tiny OTP Display
 
-Today you will program an ATtiny1616 microcontroller and wire it to a small SPI OLED display. By the end, your circuit will show a six-digit code when it powers up.
+Today you will program an ATtiny1616 microcontroller and wire it to a small 4-pin MIDAS OLED display. By the end, your circuit will show a six-digit code when it powers up.
 
 ## What You Have
 
 - ATtiny1616 microcontroller
-- SPI 128x64 OLED display
+- 4-pin MIDAS OLED display with `VDD`, `GND`, `SCL`, and `SDA`
 - USB programmer
 - Breadboard and jumper wires
 - Arduino IDE with the ATtiny board package and libraries already installed
@@ -16,21 +16,18 @@ Power everything from the same voltage rail. Use 3.3 V, DO NOT USE 5 V.
 
 All grounds must connect together.
 
-| OLED pin | Connects to ATtiny1616 | What it does |
-| --- | --- | --- |
-| `VCC` | `VDD` | Display power |
-| `GND` | `GND` | Shared ground |
-| `SCK` or `CLK` | `PIN_PA4` | SPI clock |
-| `MOSI`, `SDA`, or `DIN` | `PIN_PA5` | SPI data into display |
-| `CS` | `PIN_PA3` | Display chip select |
-| `DC` | `PIN_PA6` | Data/command select |
-| `RST` or `RES` | `PIN_PA7` | Display reset |
+| OLED pin | Connects to ATtiny1616 | 20-pin SOIC chip pin | What it does |
+| --- | --- | --- | --- |
+| `VDD` | `VDD` | 1 | Display power |
+| `GND` | `GND` | 20 | Shared ground |
+| `SCL` | `PB0 / SCL` | 11 | Display clock |
+| `SDA` | `PB1 / SDA` | 10 | Display data |
 
 Programmer wiring:
 
 | Programmer pin | Connects to ATtiny1616 |
 | --- | --- |
-| `UPDI` | `PA0 / UPDI` |
+| `UPDI` | `PA0 / RESET / UPDI`, chip pin 16 |
 | `VCC` or `VTG` | Same power rail as ATtiny |
 | `GND` | Shared ground |
 
@@ -39,13 +36,10 @@ Bare adapter check before powering:
 | ATtiny signal | 20-pin chip pin, if your adapter preserves chip pin order | Your adapter label |
 | --- | --- | --- |
 | `VDD` | 1 | |
-| `PIN_PA4` | 2 | |
-| `PIN_PA5` | 3 | |
-| `PIN_PA6` | 4 | |
-| `PIN_PA7` | 5 | |
-| `GND` | 10 | |
-| `PIN_PA3` | 17 | |
-| `PA0 / UPDI` | 18 | |
+| `PB1 / SDA` | 10 | |
+| `PB0 / SCL` | 11 | |
+| `PA0 / RESET / UPDI` | 16 | |
+| `GND` | 20 | |
 
 If your adapter has different labels, use the adapter sheet from your instructor.
 
@@ -143,9 +137,10 @@ In this workshop, the chip uses seconds since power-up instead of real clock tim
 Blank display:
 
 - Is `GND` connected between the OLED, ATtiny, and programmer?
-- Is OLED `VCC` connected to the correct voltage?
-- Are `SCK` and `MOSI` swapped?
-- Are `CS`, `DC`, and `RST` on the right ATtiny pins?
+- Is OLED `VDD` connected to the correct voltage?
+- Are `SCL` and `SDA` swapped?
+- Is OLED `SCL` on `PB0`, chip pin 11?
+- Is OLED `SDA` on `PB1`, chip pin 10?
 - Did the upload actually finish?
 
 Upload error:
@@ -153,7 +148,7 @@ Upload error:
 - Did you choose `Upload Using Programmer`?
 - Is the programmer set to `jtag2updi`?
 - Is the COM port correct?
-- Is the UPDI wire on `PA0 / UPDI`?
+- Is the UPDI wire on `PA0 / RESET / UPDI`, chip pin 16?
 - Does the programmer voltage match the ATtiny voltage?
 
 Weird or mirrored display:

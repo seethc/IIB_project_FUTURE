@@ -8,7 +8,7 @@ Additional required components:
 
 - megaTinyCore board package for ATtiny1616 workshops.
 - Arduino ESP32 Boards package for Arduino Nano ESP32 workshops.
-- U8g2 display library for the SPI SSD1306 OLED.
+- U8g2 display library for the 4-pin MIDAS OLED.
 - Crypto library by Rhys Weatherley / Arduino CryptoLibs for SHA1 support in the OTP demo.
 - USB serial driver for the jtag2updi programmer when using ATtiny1616 hardware.
 
@@ -123,6 +123,23 @@ Sketch > Upload Using Programmer
 
 Do not use the standard upload button unless the machine has been configured so that the button performs programmer uploads.
 
+## ATtiny1616 MIDAS OLED Wiring
+
+| OLED pin | ATtiny1616 signal | 20-pin SOIC chip pin |
+| --- | --- | --- |
+| `VDD` | `VDD` | 1 |
+| `GND` | `GND` | 20 |
+| `SCL` | `PB0 / SCL` | 11 |
+| `SDA` | `PB1 / SDA` | 10 |
+
+ATtiny1616 programmer wiring:
+
+| Programmer pin | ATtiny1616 signal | 20-pin SOIC chip pin |
+| --- | --- | --- |
+| `UPDI` | `PA0 / RESET / UPDI` | 16 |
+| `VCC` or `VTG` | `VDD` | 1 |
+| `GND` | `GND` | 20 |
+
 ## Select Arduino Nano ESP32 Settings
 
 Set the Arduino IDE `Tools` menu as follows:
@@ -143,13 +160,10 @@ The Nano ESP32 programs directly over USB-C. No UPDI programmer is used.
 
 | OLED pin | Arduino Nano ESP32 pin |
 | --- | --- |
-| `VCC` | `3V3` |
+| `VDD` | `3V3` |
 | `GND` | `GND` |
-| `SCK` or `CLK` | `D13` |
-| `MOSI`, `SDA`, or `DIN` | `D11` |
-| `CS` | `D10` |
-| `DC` | `D9` |
-| `RST` or `RES` | `D8` |
+| `SCL` | `A5 / SCL` |
+| `SDA` | `A4 / SDA` |
 
 The Nano ESP32 uploads over USB-C. Do not connect a UPDI programmer.
 
@@ -300,9 +314,9 @@ Microcontroller:
 
 Display:
 
-- "SPI is a simple way for the chip to talk to another chip."
-- "Clock says when data is ready; MOSI carries the bits."
-- "`CS`, `DC`, and `RST` are control lines for this display."
+- "This display has two signal wires."
+- "`SCL` is the clock line; `SDA` carries the data."
+- "Power, ground, clock, and data are enough for this OLED module."
 
 OTP:
 
@@ -322,15 +336,17 @@ Blank screen:
 
 - Check common ground first.
 - Check OLED power and voltage.
-- Confirm `SCK` and `MOSI` are not swapped.
-- Confirm `CS`, `DC`, and `RST` are connected to the pins listed in the selected student notebook.
-- Confirm the display is SSD1306 128x64 SPI. SH1106 or I2C modules need different code.
+- Confirm `SCL` and `SDA` are not swapped.
+- For ATtiny1616, confirm `SCL` is on `PB0`, chip pin 11.
+- For ATtiny1616, confirm `SDA` is on `PB1`, chip pin 10.
+- For Arduino Nano ESP32, confirm `SCL` is on `A5 / SCL` and `SDA` is on `A4 / SDA`.
+- Confirm the display is the 4-pin MIDAS OLED module used for the workshop.
 
 Upload failure:
 
 - Use `Sketch > Upload Using Programmer`.
 - Check programmer selection and COM port.
-- Check UPDI to `PA0 / UPDI`.
+- Check UPDI to `PA0 / RESET / UPDI`, chip pin 16.
 - Check that programmer and target share ground.
 - Disconnect OLED temporarily if power is unstable.
 
@@ -345,7 +361,7 @@ Compile failure:
 Before the workshop, prepare one bad wiring example and practice diagnosing it:
 
 - Missing shared ground: upload may fail or display may stay blank.
-- Swapped `SCK` and `MOSI`: upload works, display stays blank.
+- Swapped `SCL` and `SDA`: upload works, display stays blank.
 - Wrong COM port: upload fails before programming.
 - Wrong board package: compile fails with unknown pin names.
 

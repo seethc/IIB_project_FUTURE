@@ -1,11 +1,11 @@
 # Build a Tiny OTP Display: Arduino Nano ESP32
 
-Today you will program an Arduino Nano ESP32 and wire it to a small SPI OLED display. By the end, your circuit will show a six-digit code when it powers up.
+Today you will program an Arduino Nano ESP32 and wire it to a small 4-pin MIDAS OLED display. By the end, your circuit will show a six-digit code when it powers up.
 
 ## What You Have
 
 - Arduino Nano ESP32
-- SPI 128x64 OLED display
+- 4-pin MIDAS OLED display with `VDD`, `GND`, `SCL`, and `SDA`
 - USB-C cable
 - Breadboard and jumper wires
 - Arduino IDE with the Nano ESP32 board package and libraries already installed
@@ -18,13 +18,10 @@ All grounds must connect together.
 
 | OLED pin | Connects to Arduino Nano ESP32 | What it does |
 | --- | --- | --- |
-| `VCC` | `3V3` | Display power |
+| `VDD` | `3V3` | Display power |
 | `GND` | `GND` | Shared ground |
-| `SCK` or `CLK` | `D13` | SPI clock |
-| `MOSI`, `SDA`, or `DIN` | `D11` | SPI data into display |
-| `CS` | `D10` | Display chip select |
-| `DC` | `D9` | Data/command select |
-| `RST` or `RES` | `D8` | Display reset |
+| `SCL` | `A5 / SCL` | Display clock |
+| `SDA` | `A4 / SDA` | Display data |
 
 The Nano ESP32 programs directly over USB-C. There is no UPDI programmer wiring for this version.
 
@@ -121,9 +118,10 @@ In this workshop, the board uses seconds since power-up instead of real clock ti
 Blank display:
 
 - Is OLED `GND` connected to Nano ESP32 `GND`?
-- Is OLED `VCC` connected to `3V3`?
-- Are `SCK` and `MOSI` swapped?
-- Are `CS`, `DC`, and `RST` on the right pins?
+- Is OLED `VDD` connected to `3V3`?
+- Are `SCL` and `SDA` swapped?
+- Is OLED `SCL` on `A5 / SCL`?
+- Is OLED `SDA` on `A4 / SDA`?
 - Did the upload finish?
 
 Upload error:

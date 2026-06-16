@@ -2,7 +2,7 @@
 
 This folder is a self-contained workshop pack for a 30 minute Arduino IDE activity.
 
-Students use either an ATtiny1616 or an Arduino Nano ESP32 with an SPI SSD1306 128x64 OLED display. They start by flashing a name to the display, then show a seconds counter, then finish with a simple uptime-based OTP demo.
+Students use either an ATtiny1616 or an Arduino Nano ESP32 with a 4-pin MIDAS OLED display. They start by flashing a name to the display, then show a seconds counter, then finish with a simple uptime-based OTP demo.
 
 ## Files
 
